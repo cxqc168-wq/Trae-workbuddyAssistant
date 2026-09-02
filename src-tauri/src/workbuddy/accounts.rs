@@ -19,8 +19,13 @@ pub fn save_accounts_to_path(path: &Path, accounts: &[Value]) -> std::io::Result
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(accounts).unwrap_or_default())?;
+    let tmp = path.with_extension(format!(
+        "json.tmp.{}",
+        std::process::id()
+    ));
+    let content = serde_json::to_vec(accounts)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, path)
 }
 
@@ -71,7 +76,8 @@ fn identity_email(account: &Value) -> Option<String> {
     Some(email.to_ascii_lowercase())
 }
 
-/// 按 uid（优先）/真实邮箱去重合并进列表，命中保留本地 id。
+/// 按 uid 匹配（collected 有 uid 时仅按 uid）；collected 无 uid 时按真实邮箱兜底，
+/// 去重合并进列表，命中保留本地 id。
 pub fn upsert_collected_account(accounts: &mut Vec<Value>, mut collected: Value) -> Value {
     let collected_uid = get_str(&collected, "uid");
     let collected_email = identity_email(&collected);
@@ -89,15 +95,15 @@ pub fn upsert_collected_account(accounts: &mut Vec<Value>, mut collected: Value)
         .filter_map(|(i, a)| matches(a).then_some(i))
         .collect();
     if let Some(&first) = idx.first() {
-        if let Some(id) = accounts[first].get("id").cloned() {
+        if let Some(id) = accounts[first].get("id").filter(|v| !v.is_null()).cloned() {
             collected["id"] = id;
         }
         if get_str(&collected, "uid").is_none() {
-            if let Some(uid) = accounts[first].get("uid").cloned() {
+            if let Some(uid) = accounts[first].get("uid").filter(|v| !v.is_null()).cloned() {
                 collected["uid"] = uid;
             }
         }
-        if let Some(created) = accounts[first].get("createdAt").cloned() {
+        if let Some(created) = accounts[first].get("createdAt").filter(|v| !v.is_null()).cloned() {
             collected["createdAt"] = created;
         }
         for i in idx.into_iter().rev() {
@@ -162,5 +168,33 @@ mod tests {
         save_accounts_to_path(&p, &list).unwrap();
         assert_eq!(load_accounts_from_path(&p).len(), 1);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn duplicate_uid_entries_are_merged_into_one() {
+        let mut list = vec![
+            json!({"id": "a", "uid": "u1"}),
+            json!({"id": "b", "uid": "u1"}),
+            json!({"id": "c", "uid": "u2"}),
+        ];
+        upsert_collected_account(&mut list, json!({"id": "d", "uid": "u1", "nickname": "新"}));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0]["id"], "a");
+        assert_eq!(list[0]["nickname"], "新");
+        assert_eq!(list[1]["id"], "c");
+    }
+
+    #[test]
+    fn uid_backfilled_from_existing_when_missing() {
+        let mut list = vec![json!({"id": "a", "uid": "u1", "email": "user@e.com"})];
+        let saved = upsert_collected_account(&mut list, json!({"id": "b", "email": "user@e.com"}));
+        assert_eq!(saved["uid"], "u1");
+    }
+
+    #[test]
+    fn nickname_equal_email_is_placeholder_not_identity() {
+        let mut list = vec![json!({"id": "a", "nickname": "n@x.com", "email": "n@x.com"})];
+        upsert_collected_account(&mut list, json!({"id": "b", "nickname": "n@x.com", "email": "n@x.com"}));
+        assert_eq!(list.len(), 2);
     }
 }
