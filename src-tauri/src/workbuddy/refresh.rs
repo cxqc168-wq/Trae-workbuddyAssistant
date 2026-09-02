@@ -14,10 +14,29 @@ pub fn load_accounts() -> Vec<Value> {
     load_accounts_from_path(&accounts_file())
 }
 
+fn store_write_lock() -> &'static std::sync::Mutex<()> {
+    static M: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(()))
+}
+
 pub fn persist_account(acc: &Value) {
+    let _lock = store_write_lock().lock().unwrap();
     let mut list = load_accounts();
     upsert_collected_account(&mut list, acc.clone());
     let _ = save_accounts_to_path(&accounts_file(), &list);
+}
+
+/// 按 id 删除账号；不存在返回 Err。
+pub fn delete_account(account_id: &str) -> Result<(), String> {
+    let _lock = store_write_lock().lock().unwrap();
+    let path = super::store_path().join("workbuddy_accounts.json");
+    let mut list = load_accounts_from_path(&path);
+    let before = list.len();
+    list.retain(|a| a.get("id").and_then(|v| v.as_str()) != Some(account_id));
+    if list.len() == before {
+        return Err("账号不存在".into());
+    }
+    save_accounts_to_path(&path, &list).map_err(|e| e.to_string())
 }
 
 /// 惰性刷新阈值（小时）。
@@ -92,14 +111,15 @@ mod tests {
 
     #[test]
     fn missing_rt_marks_relogin() {
-        // 无 rt：不联网路径，标记后落盘到 store_path（测试环境为真实 APPDATA，
-        // 用无意义 id 避免污染；断言仅看返回值语义）
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _lock = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("wb-refresh-test-{}", super::super::now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("TRAEWB_TEST_STORE", &dir);
         let acc = refresh_account_token(json!({"id": "test-missing-rt", "access_token": "a"}));
+        std::env::remove_var("TRAEWB_TEST_STORE");
+        std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(acc["needs_relogin"], true);
-        // 清理测试写入的账号，避免污染真实数据目录
-        let list = load_accounts();
-        let filtered: Vec<Value> = list.into_iter().filter(|a| a.get("id") != Some(&json!("test-missing-rt"))).collect();
-        let _ = save_accounts_to_path(&accounts_file(), &filtered);
     }
 
     #[test]

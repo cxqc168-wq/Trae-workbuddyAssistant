@@ -62,14 +62,7 @@ pub fn workbuddy_add_manual(args: ManualAccountArgs) -> Result<Value, String> {
 
 #[tauri::command]
 pub fn workbuddy_delete_account(account_id: String) -> Result<(), String> {
-    let path = crate::workbuddy::store_path().join("workbuddy_accounts.json");
-    let mut list = crate::workbuddy::accounts::load_accounts_from_path(&path);
-    let before = list.len();
-    list.retain(|a| a.get("id").and_then(|v| v.as_str()) != Some(account_id.as_str()));
-    if list.len() == before {
-        return Err("账号不存在".into());
-    }
-    crate::workbuddy::accounts::save_accounts_to_path(&path, &list).map_err(|e| e.to_string())
+    refresh::delete_account(&account_id)
 }
 
 #[tauri::command(async)]
