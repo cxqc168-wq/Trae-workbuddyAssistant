@@ -97,6 +97,7 @@ fn main() {
             commands::oauth::oauth_callback_start,
             commands::oauth::oauth_callback_stop,
             commands::workbuddy::workbuddy_list_accounts,
+            commands::workbuddy::workbuddy_client_status,
             commands::workbuddy::workbuddy_import_local,
             commands::workbuddy::workbuddy_add_manual,
             commands::workbuddy::workbuddy_delete_account,
@@ -104,6 +105,8 @@ fn main() {
             commands::workbuddy::workbuddy_checkin_all,
             commands::workbuddy::workbuddy_credits,
             commands::workbuddy::workbuddy_refresh_token,
+            commands::workbuddy::workbuddy_oauth_start,
+            commands::workbuddy::workbuddy_oauth_poll,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

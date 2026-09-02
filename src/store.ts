@@ -51,6 +51,7 @@ interface AppState {
   view: ViewKey;
   module: ModuleKey;
   wbCheckin: WbCheckinState;
+  wbClientLoggedIn: boolean;
   env: EnvStatus | null;
   certInstalled: boolean;
   proxy: ProxyStatus;
@@ -81,6 +82,7 @@ interface AppState {
   applyCheckinEvent: (e: CheckinProgressEvent) => void;
 
   refreshEnv: () => Promise<void>;
+  refreshWbClient: () => Promise<void>;
   refreshCert: () => Promise<void>;
   refreshProxy: () => Promise<void>;
   refreshApiStatus: () => Promise<void>;
@@ -161,6 +163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   view: 'dashboard',
   module: 'trae',
   wbCheckin: { running: false, results: [] },
+  wbClientLoggedIn: false,
   env: null,
   certInstalled: false,
   proxy: { running: false, port: 0, captured: 0, started_at: null },
@@ -268,6 +271,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     await Promise.all([
       get().refreshEnv(),
+      get().refreshWbClient(),
       get().refreshCert(),
       get().refreshProxy(),
       get().refreshApiStatus(),
@@ -293,7 +297,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (m === get().module) return;
     set({
       module: m,
-      view: m === 'trae' ? 'dashboard' : 'wb-accounts',
+      view: m === 'trae' ? 'dashboard' : 'wb-dashboard',
     });
   },
   setWbCheckin: (partial) =>
@@ -352,6 +356,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ env });
     } catch (err) {
       get().pushToast('error', `环境检测失败：${String(err)}`);
+    }
+  },
+  refreshWbClient: async () => {
+    try {
+      const r = await api.workbuddy.clientStatus();
+      set({ wbClientLoggedIn: r.loggedIn });
+    } catch {
+      // 客户端检测失败不阻断初始化，保持默认未登录态
     }
   },
   refreshCert: async () => {

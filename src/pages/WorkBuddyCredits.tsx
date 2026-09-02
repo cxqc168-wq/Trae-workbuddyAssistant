@@ -138,7 +138,7 @@ export default function WorkBuddyCredits() {
         <EmptyState
           icon={<Coins size={28} />}
           title="暂无积分数据"
-          hint="请先在「账号列表」添加账号。"
+          hint="请先在「账号管理」添加账号。"
         />
       ) : (
         <div className="space-y-3">

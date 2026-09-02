@@ -1,0 +1,21 @@
+{
+  "identifier": "default",
+  "description": "主窗口默认权限：核心 API + 通知 + 对话框 + Shell",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "notification:default",
+    "shell:default",
+    "shell:allow-open",
+    "dialog:default"
+  ]
+}

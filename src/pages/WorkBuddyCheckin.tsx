@@ -54,11 +54,8 @@ export default function WorkBuddyCheckin() {
     });
     const un2 = listen<WorkBuddyCheckinDone>('workbuddy-checkin-done', (e) => {
       setWbCheckin({ running: false });
-      const d = e.payload;
-      toast(
-        d.failed > 0 ? 'warn' : 'success',
-        `签到完成：成功 ${d.ok}，已签 ${d.already}，失败 ${d.failed}`,
-      );
+      // toast 由发起方（本页或顶栏）在 checkinAll 返回后统一提示，避免双发
+      void e.payload;
       void reload();
     });
     return () => {
@@ -95,11 +92,19 @@ export default function WorkBuddyCheckin() {
     try {
       // 命令阻塞至全部完成并返回全量结果；期间进度通过事件推送
       const entries = await api.workbuddy.checkinAll(targetIds);
-      // 覆盖式兜底（事件丢失时结果仍完整）；收尾复位不依赖事件；toast+reload 由 done 事件负责
+      // 覆盖式兜底（事件丢失时结果仍完整）；收尾复位不依赖事件
       setWbCheckin({
         results: entries.map((e, i) => ({ ...e, index: i, total: entries.length })),
         running: false,
       });
+      // 发起方负责汇总提示（顶栏发起时由顶栏提示，此处不重复）
+      const ok = entries.filter((e) => e.result === 'success').length;
+      const already = entries.filter((e) => e.result === 'already').length;
+      const failed = entries.length - ok - already;
+      toast(
+        failed > 0 ? 'warn' : 'success',
+        `签到完成：成功 ${ok}，已签 ${already}，失败 ${failed}`,
+      );
     } catch (e) {
       setWbCheckin({ running: false });
       toast('error', `签到失败：${String(e)}`);
@@ -144,7 +149,7 @@ export default function WorkBuddyCheckin() {
         <EmptyState
           icon={<Users size={28} />}
           title="暂无 WorkBuddy 账号"
-          hint="请先切换到「账号列表」页面，导入本机账号或手动添加后再发起签到。"
+          hint="请先切换到「账号管理」页面，导入本机账号或手动添加后再发起签到。"
         />
       ) : (
         <div className="card divide-y divide-slate-100 dark:divide-zinc-800">

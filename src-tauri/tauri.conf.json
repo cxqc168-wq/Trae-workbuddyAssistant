@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Trae Work 助手",
+  "version": "2.4.4",
+  "identifier": "com.traework.assistant",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Trae Work 助手",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 960,
+        "minHeight": 600,
+        "decorations": false,
+        "resizable": true,
+        "center": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": ["icons/icon.ico"],
+    "resources": {
+      "../src-python/": "python/",
+      "../src-ps/": "ps/"
+    },
+    "shortDescription": "Trae Work 多账号签到与管理助手",
+    "longDescription": "整合多账号签到、登录态切换、设备隔离与账号分组的 Windows 桌面端工具。",
+    "publisher": "Trae Work 助手",
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": ["SimpChinese"]
+      }
+    }
+  },
+  "plugins": {}
+}

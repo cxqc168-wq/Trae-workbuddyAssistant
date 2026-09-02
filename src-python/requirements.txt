@@ -1,0 +1,4 @@
+# Trae Work 助手 - Python 核心依赖
+# auto_checkin.py 仅使用标准库；device_proxy.py 需要 cryptography 生成自签 CA。
+cryptography>=42.0.0
+pywin32>=306; platform_system == "Windows"

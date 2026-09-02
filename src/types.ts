@@ -9,6 +9,7 @@ export type ViewKey =
   | 'logs'
   | 'api-service'
   | 'settings'
+  | 'wb-dashboard'
   | 'wb-accounts'
   | 'wb-checkin'
   | 'wb-credits';

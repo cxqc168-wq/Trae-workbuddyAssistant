@@ -59,6 +59,27 @@ pub fn http_post_json(url: &str, body: &Value, headers: &HashMap<String, String>
     }
 }
 
+/// GET JSON；任何失败都返回形状化 JSON（含 code/message），不 panic。
+pub fn http_get_json(url: &str, headers: &HashMap<String, String>) -> Value {
+    let mut req = agent().get(url);
+    for (k, v) in headers {
+        req = req.set(k, v);
+    }
+    match req.call() {
+        Ok(resp) => resp
+            .into_string()
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| serde_json::json!({"code": -1, "message": "响应解析失败"})),
+        Err(ureq::Error::Status(code, resp)) => resp
+            .into_string()
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| serde_json::json!({"code": code, "message": format!("HTTP {code}")})),
+        Err(e) => serde_json::json!({"code": -1, "message": format!("网络错误: {e}")}),
+    }
+}
+
 /// 判断是否因 token 失效被拒。
 pub fn is_unauthorized(resp: &Value) -> bool {
     let code = resp.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);

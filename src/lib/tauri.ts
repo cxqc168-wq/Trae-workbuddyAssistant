@@ -162,6 +162,7 @@ export const api = {
   },
   workbuddy: {
     listAccounts: () => invoke<WorkBuddyAccountMeta[]>('workbuddy_list_accounts'),
+    clientStatus: () => invoke<{ loggedIn: boolean }>('workbuddy_client_status'),
     importLocal: () => invoke<WorkBuddyAccountMeta>('workbuddy_import_local'),
     addManual: (args: { access_token: string; refresh_token?: string; uid?: string; nickname?: string }) =>
       invoke<WorkBuddyAccountMeta>('workbuddy_add_manual', { args }),
@@ -170,6 +171,8 @@ export const api = {
     checkinAll: (accountIds?: string[]) => invoke<WorkBuddyCheckinEntry[]>('workbuddy_checkin_all', { accountIds }),
     credits: (accountId?: string) => invoke<WorkBuddyCreditSummary[]>('workbuddy_credits', { accountId }),
     refreshToken: (accountId: string) => invoke<WorkBuddyAccountMeta>('workbuddy_refresh_token', { accountId }),
+    oauthStart: () => invoke<{ loginId: string; verificationUri: string; expiresIn: number }>('workbuddy_oauth_start'),
+    oauthPoll: (loginId: string) => invoke<{ done: boolean; result?: WorkBuddyAccountMeta; error?: string }>('workbuddy_oauth_poll', { loginId }),
   },
 };
 

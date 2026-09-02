@@ -7,6 +7,7 @@ use crate::workbuddy::accounts::{account_meta, get_str};
 use crate::workbuddy::auth_file;
 use crate::workbuddy::checkin;
 use crate::workbuddy::credits;
+use crate::workbuddy::oauth;
 use crate::workbuddy::refresh;
 
 fn load_all() -> Vec<Value> {
@@ -20,6 +21,12 @@ pub fn workbuddy_list_accounts() -> Vec<Value> {
         m["checkedToday"] = json!(checkin::checked_in_today(a));
         m
     }).collect()
+}
+
+/// 检测本机 WorkBuddy 客户端登录态（基于官方认证文件，只读，不导入）。
+#[tauri::command]
+pub fn workbuddy_client_status() -> Value {
+    json!({ "loggedIn": auth_file::import_from_auth_file().is_some() })
 }
 
 #[tauri::command(async)]
@@ -114,4 +121,16 @@ pub fn workbuddy_refresh_token(account_id: String) -> Result<Value, String> {
         return Err("该账号没有 refresh_token".into());
     }
     Ok(account_meta(&refresh::refresh_account_token(acc)))
+}
+
+/// 发起 OAuth 扫码登录：返回 loginId + 浏览器打开的验证页地址。
+#[tauri::command(async)]
+pub fn workbuddy_oauth_start() -> Result<Value, String> {
+    oauth::oauth_start()
+}
+
+/// 轮询扫码登录结果；授权完成后自动采集账号入库。
+#[tauri::command(async)]
+pub fn workbuddy_oauth_poll(login_id: String) -> Result<Value, String> {
+    Ok(oauth::oauth_poll(&login_id))
 }

@@ -3,6 +3,7 @@ pub mod auth_file;
 pub mod checkin;
 pub mod credits;
 pub mod http;
+pub mod oauth;
 pub mod refresh;
 
 use std::path::PathBuf;
