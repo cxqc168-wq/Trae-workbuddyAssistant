@@ -11,11 +11,12 @@ Trae Work Assistant 是一款开源的 Windows 桌面工具，为 **Trae** 与 *
 双模块设计，侧边栏一键切换：
 
 - **TRAE 模块**：账号管理、OAuth 登录、一键签到、积分看板、本地代理、API 网关、定时任务
+
 - **WorkBuddy 模块**：独立的概览看板、账号管理（auth 文件导入 / Token 管理）、批量签到（并发保护 + 新旧端点回退）、积分查询与排行
 
 ## 截图
 
-![主界面](docs/images/main.png)
+![主界面](docs/images/main.png?v=2)
 
 ## 免责声明
 
@@ -33,16 +34,27 @@ Trae Work Assistant 是一款开源的 Windows 桌面工具，为 **Trae** 与 *
 ## 功能
 
 - **账号管理**：多账号 JWT 录入/编辑/查看、OAuth 登录、分组管理、设备 ID 隔离
+
 - **登录态切换**：保存当前登录态 → 恢复目标账号 → 启动，精准备份 9 类核心文件
+
 - **一键签到**：批量签到、按分组/手动勾选、跳过已签/过期、实时进度
+
 - **积分看板**：排行、三线趋势图（总数/获得/消耗）、今日新增统计
+
 - **WorkBuddy 支持**：独立模块覆盖 WorkBuddy 账号管理、批量签到（每账号互斥锁 + 全局轮次锁并发保护、失败自动回退旧 API 端点、Token 刷新与 401 自动重试）、积分概览
+
 - **本地代理**：MITM 代理自动捕获 JWT、注入独立设备 ID；**自动串联已有系统代理（VPN）作为上游**，开启代理后外网访问不受影响，停止时原样还原系统代理
+
 - **API 网关**：内嵌 OpenAI 兼容 API 服务，账号池智能调度（积分过期感知 + 冷却状态机）
+
 - **定时任务**：Windows 计划任务，后台自动签到
+
 - **6 层设备标识重置**：machineid / storage.json 遥测 / aha.device / 注册表 MachineGuid / webview 追踪数据 / aha TinyStorage
+
 - **快照管理**：查看/备份/恢复/删除账号登录态快照
+
 - **暗色模式**：全界面暗色主题支持，图表动态适配
+
 - **数据全部本地存储**，不上传任何服务器
 
 ## 开发
@@ -79,31 +91,20 @@ npm run tauri build    # 打包（msi + nsis）
 ## 文档
 
 - [更新日志](CHANGELOG.md) — 各版本变更记录
+
 - [用户手册](docs/user-manual.md) — 功能说明与使用指南
+
 - [API 文档](docs/api-doc.md) — Tauri 前后端命令契约
+
 - [技术框架](docs/tech-framework.md) — 架构设计与数据模型
+
 - [运行手册](docs/operation-manual.md) — 开发环境与部署指南
 
 ## 作者
 
-<table>
-  <tr>
-    <td width="120" align="center">
-      <img src="src/assets/reward-qr.png" width="120" alt="赞赏码" /><br />
-      <sub>赞赏作者</sub>
-    </td>
-    <td>
-
-**极泊Poles** — 本项目作者
-
-- GitHub：[@cxqc168-wq](https://github.com/cxqc168-wq)
-- QQ：203505609
-
-如果这个工具帮到了你，欢迎给项目点一个 ⭐ Star，或扫描左侧赞赏码请作者喝杯咖啡 ☕
-
-    </td>
-  </tr>
-</table>
+| 赞赏作者   | \*\*极泊Poles\*\* — 本项目作者 - GitHub：\[@cxqc168-wq]\(<https://github.com/cxqc168-wq>) - QQ：203505609 如果这个工具帮到了你，欢迎给项目点一个 ⭐ Star，或扫描左侧赞赏码请作者喝杯咖啡 ☕ |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| <br /> | <br />                                                                                                                                        |
 
 ## License
 
