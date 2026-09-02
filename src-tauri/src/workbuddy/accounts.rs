@@ -19,10 +19,8 @@ pub fn save_accounts_to_path(path: &Path, accounts: &[Value]) -> std::io::Result
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension(format!(
-        "json.tmp.{}",
-        std::process::id()
-    ));
+    let tid = format!("{:?}", std::thread::current().id());
+    let tmp = path.with_extension(format!("json.tmp.{}.{}", std::process::id(), tid));
     let content = serde_json::to_vec(accounts)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     std::fs::write(&tmp, content)?;

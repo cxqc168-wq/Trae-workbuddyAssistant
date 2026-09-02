@@ -13,13 +13,39 @@ fn accounts_running() -> &'static Mutex<HashSet<String>> {
     M.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+fn log_write_lock() -> &'static Mutex<()> {
+    static M: OnceLock<Mutex<()>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(()))
+}
+
+/// 账号运行守卫：离开作用域自动从 running 集合移除，防止 panic 泄漏。
+struct AccountRunGuard {
+    key: String,
+}
+
+impl AccountRunGuard {
+    fn acquire(key: String) -> Option<Self> {
+        let mut running = accounts_running().lock().unwrap();
+        if running.insert(key.clone()) {
+            Some(Self { key })
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for AccountRunGuard {
+    fn drop(&mut self) {
+        accounts_running().lock().unwrap().remove(&self.key);
+    }
+}
+
 /// 发签到请求；未授权且有 refresh token 时刷新重试一次。
 fn checkin_request(path: &str, account: &Value) -> Value {
     let url = format!("{WORKBUDDY_API_ENDPOINT}{path}");
     let mut resp = http_post_json(&url, &json!({}), &build_auth_headers(account));
     if is_unauthorized(&resp) && !get_str(account, "refresh_token").unwrap_or_default().is_empty() {
         let refreshed = refresh_account_token(account.clone());
-        persist_account(&refreshed);
         resp = http_post_json(&url, &json!({}), &build_auth_headers(&refreshed));
     }
     resp
@@ -57,19 +83,28 @@ fn status_from_response(resp: &Value) -> Option<Value> {
     }))
 }
 
-/// 执行签到；"已签到"按成功。
-pub fn perform_checkin(account: &Value) -> Value {
-    let resp = checkin_request(&format!("{CHECKIN_API_PREFIX}/daily-checkin"), account);
+/// 判定签到响应：Ok(已签到按 already 成功) / Err(错误消息)。
+fn checkin_result_from_response(resp: &Value) -> Result<bool, String> {
     let code = resp.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
     if code == 0 || code == 200 {
-        return json!({"ok": true});
+        return Ok(false);
     }
     let msg = resp.get("message").or_else(|| resp.get("msg"))
         .and_then(|v| v.as_str()).unwrap_or(&format!("code={code}")).to_string();
     if msg.contains("已签到") || msg.to_lowercase().contains("repeat") {
-        return json!({"ok": true, "already": true, "message": msg});
+        return Ok(true);
     }
-    json!({"ok": false, "error": msg})
+    Err(msg)
+}
+
+/// 执行签到；"已签到"按成功。
+pub fn perform_checkin(account: &Value) -> Value {
+    let resp = checkin_request(&format!("{CHECKIN_API_PREFIX}/daily-checkin"), account);
+    match checkin_result_from_response(&resp) {
+        Ok(false) => json!({"ok": true}),
+        Ok(true) => json!({"ok": true, "already": true, "message": "今日已签到"}),
+        Err(e) => json!({"ok": false, "error": e}),
+    }
 }
 
 /// 状态三态判定。
@@ -93,6 +128,7 @@ pub fn decide_from_status(status: &Value) -> StatusDecision {
 
 /// 追加签到日志（JSON 数组文件 + 文本日志）。
 fn add_checkin_log(entry: &Value) {
+    let _lock = log_write_lock().lock().unwrap();
     let dir = super::store_path();
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("workbuddy_checkin_logs.json");
@@ -110,15 +146,10 @@ fn add_checkin_log(entry: &Value) {
 /// 单账号完整签到：刷新 → 查状态 → 未签则提交 → 记日志。
 pub fn checkin_account(account: &Value) -> Value {
     let key = get_str(account, "id").unwrap_or_else(|| account_display_name(account));
-    {
-        let mut running = accounts_running().lock().unwrap();
-        if !running.insert(key.clone()) {
-            return json!({"result": "error", "error": "该账号正在签到，请稍后再试"});
-        }
-    }
-    let result = checkin_account_inner(account);
-    accounts_running().lock().unwrap().remove(&key);
-    result
+    let Some(_guard) = AccountRunGuard::acquire(key) else {
+        return json!({"result": "error", "error": "该账号正在签到，请稍后再试"});
+    };
+    checkin_account_inner(account)
 }
 
 fn checkin_account_inner(account: &Value) -> Value {
@@ -211,9 +242,28 @@ mod tests {
         assert_eq!(decide_from_status(&json!({"ok": true, "todayCheckedIn": false})), StatusDecision::Submit);
     }
     #[test]
-    fn perform_checkin_already_message() {
-        // 不联网路径无法直接测 perform_checkin（会发请求）；此测试仅验证 decide 层语义完整性
-        let status = json!({"ok": true, "todayCheckedIn": true});
-        assert_eq!(decide_from_status(&status), StatusDecision::Already);
+    fn checkin_result_success() {
+        assert_eq!(checkin_result_from_response(&json!({"code": 0})), Ok(false));
+        assert_eq!(checkin_result_from_response(&json!({"code": 200, "data": {}})), Ok(false));
+    }
+
+    #[test]
+    fn checkin_result_already() {
+        assert_eq!(checkin_result_from_response(&json!({"code": 500, "message": "今日已签到"})), Ok(true));
+        assert_eq!(checkin_result_from_response(&json!({"code": 10001, "msg": "repeat checkin"})), Ok(true));
+    }
+
+    #[test]
+    fn checkin_result_error() {
+        assert_eq!(checkin_result_from_response(&json!({"code": 500, "message": "内部错误"})), Err("内部错误".to_string()));
+        assert_eq!(checkin_result_from_response(&json!({})), Err("code=-1".to_string()));
+    }
+
+    #[test]
+    fn status_response_fallback_fields() {
+        let resp = json!({"code": 0, "data": {"todayCheckedIn": true}});
+        assert_eq!(status_from_response(&resp).unwrap()["todayCheckedIn"], true);
+        let resp2 = json!({"code": 0, "data": {"today_checked_in": true}});
+        assert_eq!(status_from_response(&resp2).unwrap()["todayCheckedIn"], true);
     }
 }
