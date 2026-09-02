@@ -2,6 +2,8 @@ pub mod accounts;
 #[allow(dead_code)] // command 接线在后续任务，先允许未引用告警
 pub mod auth_file;
 #[allow(dead_code)] // command 接线在后续任务，先允许未引用告警
+pub mod checkin;
+#[allow(dead_code)] // command 接线在后续任务，先允许未引用告警
 pub mod http;
 #[allow(dead_code)] // command 接线在后续任务，先允许未引用告警
 pub mod refresh;
