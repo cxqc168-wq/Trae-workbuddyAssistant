@@ -5,13 +5,14 @@ import {
   Coins,
   ScrollText,
   Settings,
-  Gift,
+  UserRound,
   Server,
 } from 'lucide-react';
-import { open } from '@tauri-apps/plugin-shell';
+import { useState } from 'react';
 import { useAppStore } from '../store';
 import { cn } from '../lib/cn';
 import type { ModuleKey, ViewKey } from '../types';
+import AuthorCard from './AuthorCard';
 
 export type { ViewKey };
 
@@ -24,7 +25,8 @@ const TRAE_NAV: { key: ViewKey; label: string; icon: typeof Users }[] = [
 ];
 
 const WB_NAV: { key: ViewKey; label: string; icon: typeof Users }[] = [
-  { key: 'wb-accounts', label: '账号列表', icon: Users },
+  { key: 'wb-dashboard', label: '概览', icon: LayoutDashboard },
+  { key: 'wb-accounts', label: '账号管理', icon: Users },
   { key: 'wb-checkin', label: '一键签到', icon: PlayCircle },
   { key: 'wb-credits', label: '积分概览', icon: Coins },
 ];
@@ -48,17 +50,8 @@ export default function Sidebar({
 }) {
   const module = useAppStore((s) => s.module);
   const setModule = useAppStore((s) => s.setModule);
-  const pushToast = useAppStore((s) => s.pushToast);
   const moduleNav = module === 'trae' ? TRAE_NAV : WB_NAV;
-
-  const openInvite = async () => {
-    try {
-      const r = await (await import('../lib/tauri')).api.misc.inviteLink();
-      await open(r.url);
-    } catch (e) {
-      pushToast('error', `打开邀请链接失败：${String(e)}`);
-    }
-  };
+  const [authorOpen, setAuthorOpen] = useState(false);
 
   return (
     <aside className="flex w-52 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
@@ -112,8 +105,9 @@ export default function Sidebar({
         })}
       </nav>
 
-      {/* 底部固定：全局功能 */}
-      <div className="border-t border-slate-200 p-3 dark:border-zinc-800">
+      {/* 底部固定：全局功能 + 作者 */}
+      <div className="relative border-t border-slate-200 p-3 dark:border-zinc-800">
+        {authorOpen && <AuthorCard onClose={() => setAuthorOpen(false)} />}
         <nav className="mb-2 space-y-1">
           {GLOBAL_NAV.map((item) => {
             const Icon = item.icon;
@@ -136,11 +130,16 @@ export default function Sidebar({
           })}
         </nav>
         <button
-          onClick={openInvite}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 px-3 py-2 text-sm font-semibold text-white shadow-[0_8px_20px_-8px_rgba(245,158,11,0.5)] transition hover:from-amber-400 hover:to-amber-300 active:scale-[0.98]"
+          onClick={() => setAuthorOpen((v) => !v)}
+          className={cn(
+            'flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition active:scale-[0.98]',
+            authorOpen
+              ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
+              : 'border-slate-300 text-slate-700 hover:border-slate-400 hover:bg-slate-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-500 dark:hover:bg-zinc-800',
+          )}
         >
-          <Gift size={16} />
-          邀请得 5000 积分
+          <UserRound size={16} />
+          作者
         </button>
       </div>
     </aside>
