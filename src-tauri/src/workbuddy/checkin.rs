@@ -18,6 +18,11 @@ fn log_write_lock() -> &'static Mutex<()> {
     M.get_or_init(|| Mutex::new(()))
 }
 
+fn round_running() -> &'static Mutex<bool> {
+    static M: OnceLock<Mutex<bool>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(false))
+}
+
 /// 账号运行守卫：离开作用域自动从 running 集合移除，防止 panic 泄漏。
 struct AccountRunGuard {
     key: String,
@@ -37,6 +42,27 @@ impl AccountRunGuard {
 impl Drop for AccountRunGuard {
     fn drop(&mut self) {
         accounts_running().lock().unwrap().remove(&self.key);
+    }
+}
+
+/// 全局轮次守卫：同一时刻只允许一轮全签；离开作用域自动复位，防止 panic 泄漏。
+struct RoundGuard;
+
+impl RoundGuard {
+    fn acquire() -> Option<Self> {
+        let mut running = round_running().lock().unwrap();
+        if *running {
+            None
+        } else {
+            *running = true;
+            Some(Self)
+        }
+    }
+}
+
+impl Drop for RoundGuard {
+    fn drop(&mut self) {
+        *round_running().lock().unwrap() = false;
     }
 }
 
@@ -179,7 +205,20 @@ fn checkin_account_inner(account: &Value) -> Value {
 }
 
 /// 一键全签（或指定 ids）。on_result 在每账号完成时回调（index, total, 结果对象）。
-pub fn checkin_all_with<F: FnMut(usize, usize, &Value)>(ids: Option<&[String]>, mut on_result: F) -> Vec<Value> {
+/// 同一时刻仅允许一轮执行；重复触发整轮直接跳过并返回明确结果。
+pub fn checkin_all_with<F: FnMut(usize, usize, &Value)>(ids: Option<&[String]>, on_result: F) -> Vec<Value> {
+    let Some(_guard) = RoundGuard::acquire() else {
+        return vec![json!({
+            "accountId": null,
+            "email": "全部账号",
+            "result": "error",
+            "error": "已有一轮签到正在进行，请稍后再试",
+        })];
+    };
+    checkin_all_inner(ids, on_result)
+}
+
+fn checkin_all_inner<F: FnMut(usize, usize, &Value)>(ids: Option<&[String]>, mut on_result: F) -> Vec<Value> {
     let accounts = load_accounts();
     let selected: Vec<Value> = accounts
         .into_iter()

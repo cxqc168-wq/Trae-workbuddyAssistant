@@ -418,14 +418,12 @@ export default function WorkBuddy() {
     try {
       // 命令阻塞至全部完成并返回全量结果；期间进度通过事件推送
       const entries = await api.workbuddy.checkinAll(targetIds);
-      if (entries && entries.length > 0) {
-        setCheckinResults(entries);
-        setCheckinRunning(false);
-        void reload();
-      }
+      // 覆盖式兜底（事件丢失时结果仍完整）；收尾复位不依赖事件；toast+reload 由 done 事件负责
+      setCheckinResults(entries);
+      setCheckinRunning(false);
     } catch (e) {
       setCheckinRunning(false);
-      toast('error', `发起签到失败：${String(e)}`);
+      toast('error', `签到失败：${String(e)}`);
     }
   };
 
