@@ -86,7 +86,12 @@ export default function App() {
         <Sidebar view={view} onNav={setView} />
         <main className="relative flex min-w-0 flex-1 flex-col">
           <TopBar />
-          <div className="relative min-h-0 flex-1 overflow-auto p-5">{renderView(view)}</div>
+          <div
+            key={view}
+            className="relative min-h-0 flex-1 overflow-auto p-5 animate-[fadeIn_120ms_ease-out]"
+          >
+            {renderView(view)}
+          </div>
         </main>
       </div>
       <Toaster />

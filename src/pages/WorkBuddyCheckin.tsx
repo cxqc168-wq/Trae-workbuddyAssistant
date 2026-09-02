@@ -97,7 +97,7 @@ export default function WorkBuddyCheckin() {
       const entries = await api.workbuddy.checkinAll(targetIds);
       // 覆盖式兜底（事件丢失时结果仍完整）；收尾复位不依赖事件；toast+reload 由 done 事件负责
       setWbCheckin({
-        results: entries.map((e, i) => ({ ...e, index: i + 1, total: entries.length })),
+        results: entries.map((e, i) => ({ ...e, index: i, total: entries.length })),
         running: false,
       });
     } catch (e) {
