@@ -1,4 +1,4 @@
-﻿import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { PlayCircle, CheckCircle2, XCircle, Clock, AlertCircle, HelpCircle, AlertTriangle, Snowflake } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import { Badge, Progress } from '../components/ui';
@@ -136,7 +136,7 @@ export default function Checkin() {
                 <button
                   key={o.k}
                   onClick={() => setScope(o.k)}
-                  className={`chip border ${scope === o.k ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300' : 'border-slate-300 text-slate-500'}`}
+                  className={`chip border ${scope === o.k ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300' : 'border-slate-300 text-slate-500 dark:border-zinc-700 dark:text-zinc-400'}`}
                 >
                   {o.t}
                 </button>

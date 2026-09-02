@@ -65,6 +65,8 @@ export default function App() {
       const theme = useAppStore.getState().settings?.theme ?? 'system';
       const dark = theme === 'dark' || (theme === 'system' && mq.matches);
       document.documentElement.classList.toggle('dark', dark);
+      // 同步原生控件(复选框/下拉/滚动条)的渲染主题与应用一致
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     };
     apply();
     mq.addEventListener('change', apply);

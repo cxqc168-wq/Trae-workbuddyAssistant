@@ -461,7 +461,7 @@ export default function WorkBuddyAccounts() {
             className={`chip border ${
               filter === c.key
                 ? 'border-brand-500 text-brand-600'
-                : 'border-slate-300 text-slate-500'
+                : 'border-slate-300 text-slate-500 dark:border-zinc-700 dark:text-zinc-400'
             }`}
           >
             {c.label} ({c.count})

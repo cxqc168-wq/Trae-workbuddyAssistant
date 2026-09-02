@@ -20,6 +20,7 @@ import { open } from '@tauri-apps/plugin-shell';
 import { useAppStore } from '../store';
 import { api } from '../lib/tauri';
 import { Badge } from './ui';
+import ThemeToggle from './ThemeToggle';
 import type { WorkBuddyAccountMeta } from '../types';
 
 /** 顶栏按左侧当前模块切换：TRAE 显示 Trae 状态栏，WorkBuddy 显示 WB 状态栏（全局页跟随当前模块）。 */
@@ -70,6 +71,7 @@ function TraeBar() {
         </Badge>
       </div>
       <div className="flex items-center gap-2">
+        <ThemeToggle />
         <button onClick={openTrae} className="btn-outline">
           <ExternalLink size={15} /> {env?.installed ? '打开 Trae Work' : '下载 Trae Work'}
         </button>
@@ -179,6 +181,7 @@ function WorkBuddyBar() {
         </Badge>
       </div>
       <div className="flex items-center gap-2">
+        <ThemeToggle />
         <button onClick={() => void openWorkBuddy()} className="btn-outline">
           <ExternalLink size={15} /> 打开 WorkBuddy
         </button>

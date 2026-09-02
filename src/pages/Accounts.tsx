@@ -208,13 +208,13 @@ export default function Accounts() {
       <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         <button
           onClick={() => setFilter('all')}
-          className={`chip border ${filter === 'all' ? 'border-brand-500 text-brand-600' : 'border-slate-300 text-slate-500'}`}
+          className={`chip border ${filter === 'all' ? 'border-brand-500 text-brand-600' : 'border-slate-300 text-slate-500 dark:border-zinc-700 dark:text-zinc-400'}`}
         >
           全部 ({accounts.length})
         </button>
         <button
           onClick={() => setFilter('ungrouped')}
-          className={`chip border ${filter === 'ungrouped' ? 'border-brand-500 text-brand-600' : 'border-slate-300 text-slate-500'}`}
+          className={`chip border ${filter === 'ungrouped' ? 'border-brand-500 text-brand-600' : 'border-slate-300 text-slate-500 dark:border-zinc-700 dark:text-zinc-400'}`}
         >
           未分组 ({accounts.filter((a) => !a.group_id).length})
         </button>
@@ -222,7 +222,7 @@ export default function Accounts() {
           <button
             key={g.id}
             onClick={() => setFilter(g.id)}
-            className={`chip border ${filter === g.id ? 'border-brand-500 text-brand-600' : 'border-slate-300 text-slate-500'}`}
+            className={`chip border ${filter === g.id ? 'border-brand-500 text-brand-600' : 'border-slate-300 text-slate-500 dark:border-zinc-700 dark:text-zinc-400'}`}
             style={{ borderColor: filter === g.id ? g.color : undefined }}
           >
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: g.color }} />
