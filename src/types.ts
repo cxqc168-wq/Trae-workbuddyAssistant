@@ -9,7 +9,11 @@ export type ViewKey =
   | 'logs'
   | 'api-service'
   | 'settings'
-  | 'workbuddy';
+  | 'wb-accounts'
+  | 'wb-checkin'
+  | 'wb-credits';
+
+export type ModuleKey = 'trae' | 'workbuddy';
 
 export interface EnvStatus {
   installed: boolean;
