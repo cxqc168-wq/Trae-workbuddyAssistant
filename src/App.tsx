@@ -11,9 +11,12 @@ import Credits from './pages/Credits';
 import Logs from './pages/Logs';
 import Settings from './pages/Settings';
 import ApiService from './pages/ApiService';
-import WorkBuddy from './pages/WorkBuddy';
+import WorkBuddyAccounts from './pages/WorkBuddyAccounts';
+import WorkBuddyCheckin from './pages/WorkBuddyCheckin';
+import WorkBuddyCredits from './pages/WorkBuddyCredits';
+import type { ViewKey } from './types';
 
-function renderView(view: string) {
+function renderView(view: ViewKey) {
   switch (view) {
     case 'dashboard':
       return <Dashboard />;
@@ -27,8 +30,12 @@ function renderView(view: string) {
       return <Logs />;
     case 'api-service':
       return <ApiService />;
-    case 'workbuddy':
-      return <WorkBuddy />;
+    case 'wb-accounts':
+      return <WorkBuddyAccounts />;
+    case 'wb-checkin':
+      return <WorkBuddyCheckin />;
+    case 'wb-credits':
+      return <WorkBuddyCredits />;
     case 'settings':
       return <Settings />;
     default:

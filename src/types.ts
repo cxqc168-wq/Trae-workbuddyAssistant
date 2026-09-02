@@ -211,8 +211,6 @@ export interface OAuthLoginResult {
 }
 
 // ---- WorkBuddy ----
-export type WorkBuddyViewKey = 'accounts' | 'checkin' | 'credits';
-
 export interface WorkBuddyAccountMeta {
   id: string;
   uid: string | null;
