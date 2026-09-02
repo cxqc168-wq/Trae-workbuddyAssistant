@@ -289,11 +289,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setView: (v) => set({ view: v }),
 
-  setModule: (m) =>
+  setModule: (m) => {
+    if (m === get().module) return;
     set({
       module: m,
       view: m === 'trae' ? 'dashboard' : 'wb-accounts',
-    }),
+    });
+  },
   setWbCheckin: (partial) =>
     set((s) => ({ wbCheckin: { ...s.wbCheckin, ...partial } })),
 
