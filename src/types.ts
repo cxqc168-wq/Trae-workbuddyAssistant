@@ -259,6 +259,7 @@ export interface WorkBuddyCreditResource {
   expireAt: number | null;
   expired: boolean;
   expiringSoon: boolean;
+  status?: string | null;
 }
 
 export interface WorkBuddyCreditSummary {
@@ -274,4 +275,5 @@ export interface WorkBuddyCreditSummary {
   expiringSoon?: boolean;
   expired?: boolean;
   resources?: WorkBuddyCreditResource[];
+  updatedAt?: number;
 }
