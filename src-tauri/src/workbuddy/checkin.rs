@@ -178,26 +178,36 @@ fn checkin_account_inner(account: &Value) -> Value {
     json!({"result": result, "error": entry.get("error").cloned().unwrap_or(Value::Null)})
 }
 
-/// 一键全签（或指定 ids）。返回逐账号结果数组。
-pub fn checkin_all(ids: Option<&[String]>) -> Vec<Value> {
+/// 一键全签（或指定 ids）。on_result 在每账号完成时回调（index, total, 结果对象）。
+pub fn checkin_all_with<F: FnMut(usize, usize, &Value)>(ids: Option<&[String]>, mut on_result: F) -> Vec<Value> {
     let accounts = load_accounts();
+    let selected: Vec<Value> = accounts
+        .into_iter()
+        .filter(|acc| match ids {
+            Some(ids) => ids.iter().any(|x| x == acc.get("id").and_then(|v| v.as_str()).unwrap_or("")),
+            None => true,
+        })
+        .collect();
+    let total = selected.len();
     let mut out = Vec::new();
-    for acc in accounts {
-        if let Some(ids) = ids {
-            let id = acc.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            if !ids.iter().any(|x| x == id) {
-                continue;
-            }
-        }
+    for (i, acc) in selected.into_iter().enumerate() {
         let r = checkin_account(&acc);
-        out.push(json!({
+        let entry = json!({
             "accountId": acc.get("id"),
             "email": account_display_name(&acc),
             "result": r.get("result"),
             "error": r.get("error"),
-        }));
+        });
+        on_result(i, total, &entry);
+        out.push(entry);
     }
     out
+}
+
+/// 无回调包装：命令层已改用 checkin_all_with 实时推送，保留给潜在调用方/测试。
+#[allow(dead_code)]
+pub fn checkin_all(ids: Option<&[String]>) -> Vec<Value> {
+    checkin_all_with(ids, |_, _, _| {})
 }
 
 /// 今日是否已签（供账号列表展示）：该账号当天最新日志为 success/already。

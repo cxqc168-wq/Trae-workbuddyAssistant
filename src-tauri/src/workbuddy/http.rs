@@ -8,7 +8,6 @@ use super::accounts::get_str;
 
 pub const WORKBUDDY_API_ENDPOINT: &str = "https://www.codebuddy.cn";
 pub const WORKBUDDY_API_PREFIX: &str = "/v2/plugin";
-#[allow(dead_code)] // Task 4 计费接口使用
 pub const CHECKIN_API_PREFIX: &str = "/v2/billing/meter";
 
 fn agent() -> ureq::Agent {

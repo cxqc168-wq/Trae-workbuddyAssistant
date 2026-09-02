@@ -84,17 +84,16 @@ pub fn workbuddy_checkin_status(account_id: String) -> Result<Value, String> {
 
 #[tauri::command(async)]
 pub fn workbuddy_checkin_all(app: AppHandle, account_ids: Option<Vec<String>>) -> Result<Vec<Value>, String> {
-    let results = checkin::checkin_all(account_ids.as_deref());
-    for (i, r) in results.iter().enumerate() {
+    let results = checkin::checkin_all_with(account_ids.as_deref(), |index, total, entry| {
         let _ = app.emit("workbuddy-checkin-progress", json!({
-            "index": i,
-            "total": results.len(),
-            "accountId": r.get("accountId"),
-            "email": r.get("email"),
-            "result": r.get("result"),
-            "error": r.get("error"),
+            "index": index,
+            "total": total,
+            "accountId": entry.get("accountId"),
+            "email": entry.get("email"),
+            "result": entry.get("result"),
+            "error": entry.get("error"),
         }));
-    }
+    });
     let ok = results.iter().filter(|r| r["result"] == "success").count();
     let already = results.iter().filter(|r| r["result"] == "already").count();
     let failed = results.len() - ok - already;

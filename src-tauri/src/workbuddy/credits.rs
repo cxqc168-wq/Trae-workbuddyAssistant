@@ -289,11 +289,11 @@ fn is_success(response: &Value) -> bool {
     }
 }
 
-/// 发起需要账号身份的 JSON POST 请求。
+/// 认证 POST 链路：资源查询与官方用量查询共用（official_usage 本项目未移植，预留）。
 ///
-/// 资源查询和官方用量查询必须共用这条链路：先按现有惰性策略保证 token
-/// 新鲜，遇到未授权时使用 refresh token 重试一次。调用方只拿到上游 JSON，
-/// 不会把认证字段拼进返回值。
+/// 先按现有惰性策略保证 token 新鲜，遇到未授权时使用 refresh token
+/// 重试一次。调用方只拿到上游 JSON，不会把认证字段拼进返回值。
+#[allow(dead_code)]
 pub fn authenticated_post(account: &Value, url: &str, body: Value) -> Value {
     let mut working_account = ensure_fresh_token(account.clone());
     let mut response = post_with_account(&working_account, url, body.clone());
