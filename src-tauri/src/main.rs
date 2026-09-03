@@ -34,6 +34,7 @@ fn main() {
         .manage(Mutex::new(Option::<commands::proxy::ProxyHandle>::None))
         .manage(Mutex::new(Option::<commands::api_server::ApiServerRuntime>::None))
         .manage(Mutex::new(Option::<commands::oauth::OAuthCallbackHandle>::None))
+        .manage(Mutex::new(Option::<commands::browser_extract::BrowserExtractHandle>::None))
         .invoke_handler(tauri::generate_handler![
             commands::license::license_status,
             commands::license::license_activate,
@@ -99,6 +100,8 @@ fn main() {
             commands::oauth::oauth_login,
             commands::oauth::oauth_callback_start,
             commands::oauth::oauth_callback_stop,
+            commands::browser_extract::browser_extract_start,
+            commands::browser_extract::browser_extract_stop,
             commands::workbuddy::workbuddy_list_accounts,
             commands::workbuddy::workbuddy_client_status,
             commands::workbuddy::workbuddy_import_local,
@@ -243,6 +246,16 @@ fn main() {
                 let state = app_handle.state::<AppState>();
                 fs_utils::app_log(&state.data_dir, "应用退出：正在停止 API 服务");
                 rt.handle.stop();
+            }
+            // 应用退出时关闭提取浏览器，防止孤儿浏览器进程
+            let be_state = app_handle
+                .state::<Mutex<Option<commands::browser_extract::BrowserExtractHandle>>>();
+            let mut bg = be_state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(mut h) = bg.take() {
+                if let Some(st) = app_handle.try_state::<AppState>() {
+                    fs_utils::app_log(&st.data_dir, "应用退出：关闭提取浏览器");
+                }
+                h.kill_now();
             }
             // 还原系统代理，避免退出后本机全局断网
             if let Err(e) = commands::proxy::clear_win_proxy() {
