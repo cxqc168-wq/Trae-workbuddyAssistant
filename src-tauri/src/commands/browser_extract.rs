@@ -30,9 +30,12 @@ pub(crate) fn is_trae_api_url(url: &str) -> bool {
     url.contains("api.trae.com.cn")
 }
 
-/// 从 CDP 请求头 Map 中提取 Authorization 值（头名大小写不敏感）
-pub(crate) fn auth_header(headers: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
-    for (k, v) in headers {
+/// 从 CDP 请求头 JSON 中提取 Authorization 值（头名大小写不敏感）。
+/// 入参为 CDP `Network.Request.headers`（Headers newtype 的 inner，
+/// 形如 {"Authorization": "Bearer x", ...}；非对象时返回 None）
+pub(crate) fn auth_header(headers: &serde_json::Value) -> Option<String> {
+    let obj = headers.as_object()?;
+    for (k, v) in obj {
         if k.eq_ignore_ascii_case("authorization") {
             if let Some(s) = v.as_str() {
                 if !s.trim().is_empty() {
@@ -119,23 +122,37 @@ mod tests {
 
     #[test]
     fn auth_header_found() {
-        let mut h = serde_json::Map::new();
-        h.insert("Authorization".into(), json!("Bearer xyz"));
-        assert_eq!(auth_header(&h), Some("Bearer xyz".to_string()));
+        assert_eq!(
+            auth_header(&json!({"Authorization": "Bearer xyz"})),
+            Some("Bearer xyz".to_string())
+        );
     }
 
     #[test]
     fn auth_header_case_insensitive() {
-        let mut h = serde_json::Map::new();
-        h.insert("authorization".into(), json!("Bearer xyz"));
-        assert_eq!(auth_header(&h), Some("Bearer xyz".to_string()));
+        assert_eq!(
+            auth_header(&json!({"authorization": "Bearer xyz"})),
+            Some("Bearer xyz".to_string())
+        );
     }
 
     #[test]
     fn auth_header_absent() {
-        let mut h = serde_json::Map::new();
-        h.insert("Content-Type".into(), json!("application/json"));
-        assert_eq!(auth_header(&h), None);
+        assert_eq!(
+            auth_header(&json!({"Content-Type": "application/json"})),
+            None
+        );
+    }
+
+    #[test]
+    fn auth_header_non_object_returns_none() {
+        assert_eq!(auth_header(&json!("not an object")), None);
+        assert_eq!(auth_header(&json!(null)), None);
+    }
+
+    #[test]
+    fn auth_header_whitespace_value_returns_none() {
+        assert_eq!(auth_header(&json!({"Authorization": "   "})), None);
     }
 
     #[test]
