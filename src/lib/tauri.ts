@@ -24,6 +24,11 @@ import type {
   WorkBuddyCreditSummary,
 } from '../types';
 
+// 浏览器直接访问 Vite 开发服务器（如 http://localhost:5173）时没有 Tauri 运行时，
+// 用于前端降级判断，避免调用 Tauri API 时崩溃白屏。
+export const isTauri =
+  typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
 // 所有 invoke 封装集中于此，字段名严格遵循 Rust 端 snake_case 约定。
 export const api = {
   env: {
@@ -34,6 +39,11 @@ export const api = {
   cert: {
     status: () => invoke<{ installed: boolean }>('cert_status'),
     install: () => invoke<{ installed: boolean }>('cert_install'),
+  },
+  license: {
+    status: () => invoke<{ status: string; message: string }>('license_status'),
+    activate: (code: string) =>
+      invoke<{ status: string; message: string }>('license_activate', { code }),
   },
   proxy: {
     start: (port: number) => invoke<ProxyStatus>('proxy_start', { port }),

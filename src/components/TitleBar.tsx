@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Minus, Square, X } from 'lucide-react';
 import { useAppStore } from '../store';
+import { isTauri } from '../lib/tauri';
 import { Modal } from './ui';
 
-const win = getCurrentWindow();
+// 浏览器中无 Tauri 运行时，getCurrentWindow() 会在模块加载时抛错导致白屏，必须守卫
+const win = isTauri ? getCurrentWindow() : null;
 
 export default function TitleBar() {
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
@@ -20,36 +22,40 @@ export default function TitleBar() {
             TW
           </span>
           <span className="text-sm font-semibold text-slate-700 dark:text-zinc-200">
-            Trae Work 助手
+            Trae &amp; Buddy签到助手
           </span>
         </div>
         <div className="flex items-center">
           {/* onMouseDown 阻止冒泡：否则事件冒泡到外层 data-tauri-drag-region，Tauri 会启动窗口拖拽而吞掉 click，导致最小/最大化/关闭无响应 */}
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => void win.hide()}
-            className="flex h-8 w-10 items-center justify-center text-slate-500 transition hover:bg-slate-200/70 active:scale-90 dark:text-zinc-400 dark:hover:bg-zinc-800"
-            aria-label="最小化"
-            title="最小化到托盘"
-          >
-            <Minus size={15} />
-          </button>
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => void win.toggleMaximize()}
-            className="flex h-8 w-10 items-center justify-center text-slate-500 transition hover:bg-slate-200/70 active:scale-90 dark:text-zinc-400 dark:hover:bg-zinc-800"
-            aria-label="最大化"
-          >
-            <Square size={13} />
-          </button>
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => setShowCloseConfirm(true)}
-            className="flex h-8 w-10 items-center justify-center text-slate-500 transition hover:bg-rose-500 hover:text-white active:scale-90"
-            aria-label="关闭"
-          >
-            <X size={15} />
-          </button>
+          {win && (
+            <>
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => void win.hide()}
+                className="flex h-8 w-10 items-center justify-center text-slate-500 transition hover:bg-slate-200/70 active:scale-90 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                aria-label="最小化"
+                title="最小化到托盘"
+              >
+                <Minus size={15} />
+              </button>
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => void win.toggleMaximize()}
+                className="flex h-8 w-10 items-center justify-center text-slate-500 transition hover:bg-slate-200/70 active:scale-90 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                aria-label="最大化"
+              >
+                <Square size={13} />
+              </button>
+              <button
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => setShowCloseConfirm(true)}
+                className="flex h-8 w-10 items-center justify-center text-slate-500 transition hover:bg-rose-500 hover:text-white active:scale-90"
+                aria-label="关闭"
+              >
+                <X size={15} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -62,7 +68,7 @@ export default function TitleBar() {
             <button className="btn-outline" onClick={() => setShowCloseConfirm(false)}>
               取消
             </button>
-            <button className="btn-danger" onClick={() => void win.close()}>
+            <button className="btn-danger" onClick={() => void win?.close()}>
               确认退出
             </button>
           </>
