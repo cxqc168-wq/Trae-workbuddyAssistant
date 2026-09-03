@@ -20,12 +20,14 @@ chrono = { version = "0.4", features = ["serde"] }
 ureq = { version = "2", features = ["json"] }
 urlencoding = "2"
 axum = "0.7"
-tokio = { version = "1", features = ["sync", "io-util", "net", "rt", "macros"] }
+tokio = { version = "1", features = ["sync", "io-util", "net", "rt", "macros", "time", "process"] }
 tokio-stream = "0.1"
 bytes = "1"
 sha2 = "0.10"
 rsa = { version = "0.9", features = ["pem", "sha2"] }
 winreg = "0.52"
+chromiumoxide = { version = "0.7", default-features = true }
+futures = "0.3"
 
 [features]
 # 仅桌面端
