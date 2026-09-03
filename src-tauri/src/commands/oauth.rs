@@ -208,7 +208,7 @@ fn exchange_token(refresh_token: &str) -> Result<(String, Option<String>), Strin
 }
 
 /// GetUserInfo：获取用户信息
-fn get_user_info(access_token: &str) -> Result<(String, String), String> {
+pub(crate) fn get_user_info(access_token: &str) -> Result<(String, String), String> {
     let auth = if access_token.starts_with("Cloud-IDE-JWT ") {
         access_token.to_string()
     } else {
