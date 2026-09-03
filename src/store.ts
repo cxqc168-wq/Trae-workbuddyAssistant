@@ -148,6 +148,7 @@ function defaultSettings(): Settings {
     retry: 1,
     notify: 'toast',
     trae_path: null,
+    browser_path: null,
     data_dir: null,
     log_retention_days: 30,
     proxy_domains: 'trae.cn,trae.com.cn,mchost.guru,zijieapi.com,bytedance.com,volcengine.com,volces.com,treecode.com',

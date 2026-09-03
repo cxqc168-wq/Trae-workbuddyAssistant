@@ -330,6 +330,19 @@ export default function Settings() {
                 自定义安装目录时请填写 Trae Work 的 exe 路径；留空将自动探测，并在「打开 Trae Work」时优先使用此路径。
               </p>
             </div>
+            <div>
+              <label className="label">提取浏览器路径</label>
+              <input
+                type="text"
+                value={form.browser_path ?? ''}
+                onChange={(e) => update('browser_path', e.target.value.trim() || null)}
+                placeholder="留空则自动检测（Edge 优先，其次 Chrome）"
+                className="input"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                「浏览器提取 JWT」功能使用的浏览器 exe 路径；留空将按 Edge → Chrome 顺序自动探测。
+              </p>
+            </div>
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"

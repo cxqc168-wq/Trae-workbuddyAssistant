@@ -92,6 +92,8 @@ pub struct Settings {
     #[serde(default)]
     pub trae_path: Option<String>,
     #[serde(default)]
+    pub browser_path: Option<String>,
+    #[serde(default)]
     pub data_dir: Option<String>,
     #[serde(default = "default_retention")]
     pub log_retention_days: i32,
