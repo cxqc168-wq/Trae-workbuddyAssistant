@@ -4,21 +4,24 @@
 
 **Goal:** 在账户页新增「浏览器提取」入口：应用启动系统 Edge/Chrome（持久 profile），用户登录 trae.cn 后通过 CDP 拦截 API 请求的 Authorization 头提取 JWT 并自动保存账号，解决 OAuth 授权页卡「认证中」的问题。
 
-**Architecture:** 新增 Rust 模块 `commands/browser_extract.rs`，用 chromiumoxide（纯 Rust CDP 客户端）连接自管的浏览器子进程（随机调试端口 + 持久 user-data-dir），监听 `Network.requestWillBeSent` 提取 JWT → 按 user_id 去重 → 复用 oauth.rs 的账号保存模式写入 `checkin_accounts.json` → Tauri 事件推给前端弹窗。前端 `Accounts.tsx` 新增 `BrowserExtractModal`。
+**Architecture:** 新增 Rust 模块 `commands/browser_extract.rs`，用 chromiumoxide（纯 Rust CDP 客户端）连接自管的浏览器子进程（随机调试端口 + 持久 user-data-dir），监听 `Network.requestWillBeSent` 提取 JWT → 按 user\_id 去重 → 复用 oauth.rs 的账号保存模式写入 `checkin_accounts.json` → Tauri 事件推给前端弹窗。前端 `Accounts.tsx` 新增 `BrowserExtractModal`。
 
 **Tech Stack:** Rust (tauri 2, chromiumoxide 0.7, futures, tokio), TypeScript/React。
 
 **设计文档:** `docs/superpowers/specs/2026-09-03-browser-extract-jwt-design.md`
 
-**注意:** chromiumoxide 依赖较大（chromiumoxide_cdp 生成代码多），首次 `cargo check` 会多花 1-3 分钟下载编译。若编译时发现 chromiumoxide API 与计划代码有出入（版本差异），以本地 `cargo doc` / crate 源码为准调整调用方式，**保持逻辑不变**。
+**注意:** chromiumoxide 依赖较大（chromiumoxide\_cdp 生成代码多），首次 `cargo check` 会多花 1-3 分钟下载编译。若编译时发现 chromiumoxide API 与计划代码有出入（版本差异），以本地 `cargo doc` / crate 源码为准调整调用方式，**保持逻辑不变**。
 
----
+***
 
 ### Task 1: Rust 依赖与模块骨架
 
 **Files:**
+
 - Modify: `src-tauri/Cargo.toml`
+
 - Create: `src-tauri/src/commands/browser_extract.rs`
+
 - Modify: `src-tauri/src/commands/mod.rs`
 
 - [ ] **Step 1: 添加依赖**
@@ -66,11 +69,12 @@ git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/commands/browser
 git commit -m "feat(browser-extract): 添加 chromiumoxide 依赖与模块骨架"
 ```
 
----
+***
 
 ### Task 2: 纯函数实现（TDD）
 
 **Files:**
+
 - Modify: `src-tauri/src/commands/browser_extract.rs`
 
 先写测试（失败），再实现。纯函数不依赖 async/浏览器，可直接单测。
@@ -265,7 +269,7 @@ fn find_free_port() -> Option<u16> {
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml browser_extract`
-Expected: 全部 PASS（find_free_port 会有 unused 警告，Task 3 会用到，可暂容忍或加 `#[allow(dead_code)]`）
+Expected: 全部 PASS（find\_free\_port 会有 unused 警告，Task 3 会用到，可暂容忍或加 `#[allow(dead_code)]`）
 
 - [ ] **Step 5: Commit**
 
@@ -274,14 +278,15 @@ git add src-tauri/src/commands/browser_extract.rs
 git commit -m "feat(browser-extract): token 归一/请求头提取/浏览器发现纯函数（含单测）"
 ```
 
----
+***
 
 ### Task 3: oauth.rs 辅助函数开放复用
 
 **Files:**
+
 - Modify: `src-tauri/src/commands/oauth.rs:46` 和 `src-tauri/src/commands/oauth.rs:211`
 
-- [ ] **Step 1: 开放 short_agent 与 get_user_info**
+- [ ] **Step 1: 开放 short\_agent 与 get\_user\_info**
 
 [oauth.rs:46](d:\My_Codeproject\trae-daily\20260902-093039\TraeWorkAssistant-main\TraeWorkAssistant-main\src-tauri\src\commands\oauth.rs#L46) 处：
 
@@ -311,14 +316,17 @@ git add src-tauri/src/commands/oauth.rs
 git commit -m "refactor(oauth): short_agent/get_user_info 开放为 pub(crate) 供浏览器提取复用"
 ```
 
----
+***
 
-### Task 4: Settings 增加 browser_path
+### Task 4: Settings 增加 browser\_path
 
 **Files:**
+
 - Modify: `src-tauri/src/models.rs:71-108`（Settings 结构体）
+
 - Modify: `src/types.ts:76-95`（TS Settings 接口）
-- Modify: `src/pages/Settings.tsx`（代理与签到 section，trae_path 输入框之后）
+
+- Modify: `src/pages/Settings.tsx`（代理与签到 section，trae\_path 输入框之后）
 
 - [ ] **Step 1: Rust 结构体加字段**
 
@@ -372,20 +380,27 @@ git add src-tauri/src/models.rs src/types.ts src/pages/Settings.tsx
 git commit -m "feat(settings): 新增提取浏览器路径配置项 browser_path"
 ```
 
----
+***
 
 ### Task 5: 后端核心 — 启动/捕获/停止
 
 **Files:**
+
 - Modify: `src-tauri/src/commands/browser_extract.rs`（追加核心实现）
+
 - Modify: `src-tauri/src/main.rs`（manage + 命令注册 + 退出清理）
 
 **背景知识（给零上下文工程师）:**
+
 - CDP（Chrome DevTools Protocol）：浏览器调试协议。启动浏览器时传 `--remote-debugging-port=<port>`，然后 HTTP GET `http://127.0.0.1:<port>/json/version` 返回的 `webSocketDebuggerUrl` 可建立 WebSocket 连接。`Network.requestWillBeSent` 事件会携带页面发出的每个请求的 URL 和请求头。
+
 - Edge/Chrome 136+ 出于安全禁止在**默认**用户数据目录上开调试端口，但允许自定义 `--user-data-dir`——本功能用自己的数据目录，天然合规，这也是必须传自定义 profile 的另一原因。
+
 - chromiumoxide 的 `Browser::connect(ws_url)` 返回 `(Browser, Handler)`，**Handler 必须被 spawn 的任务持续 poll**（`while let Some(h) = handler.next().await`），否则收不到任何事件。
+
 - tauri 异步命令中 `State<'_, T>` 可跨 await 持有（需 `T: Send + Sync`）。
-- 账号保存逻辑参照 `src-tauri/src/commands/oauth.rs` 的 `oauth_login`（第 252-354 行）：存在同 user_id 则更新 jwt，否则 push 新 `RawAccount` 并写 groups.json。
+
+- 账号保存逻辑参照 `src-tauri/src/commands/oauth.rs` 的 `oauth_login`（第 252-354 行）：存在同 user\_id 则更新 jwt，否则 push 新 `RawAccount` 并写 groups.json。
 
 - [ ] **Step 1: 追加 handle 结构与事件载荷定义**
 
@@ -779,12 +794,14 @@ git add src-tauri/src/commands/browser_extract.rs src-tauri/src/main.rs
 git commit -m "feat(browser-extract): CDP 启动/监听/保存账号/优雅停止核心实现"
 ```
 
----
+***
 
 ### Task 6: 前端类型与 API 封装
 
 **Files:**
+
 - Modify: `src/types.ts`
+
 - Modify: `src/lib/tauri.ts`
 
 - [ ] **Step 1: types.ts 追加事件载荷类型**
@@ -832,11 +849,12 @@ git add src/types.ts src/lib/tauri.ts
 git commit -m "feat(browser-extract): 前端事件载荷类型与 api 封装"
 ```
 
----
+***
 
 ### Task 7: Accounts 页面 — 入口按钮与 BrowserExtractModal
 
 **Files:**
+
 - Modify: `src/pages/Accounts.tsx`
 
 **背景:** 页面顶部 `PageHeader` 的 actions 里已有「OAuth 登录」按钮（约 198 行）；`OAuthLoginModal` 在约 442 行渲染；`JwtStatusBadge`（38 行）接收 `hours: number | null` 显示有效期徽标，可直接复用；`Modal` 组件的 `onClose` 在 Esc/遮罩/X 时触发。
@@ -1077,13 +1095,15 @@ git add src/pages/Accounts.tsx
 git commit -m "feat(browser-extract): 账户页浏览器提取入口与实时捕获弹窗"
 ```
 
----
+***
 
 ### Task 8: OAuth 弹窗提示与 refreshJwt 报错文案
 
 **Files:**
+
 - Modify: `src/pages/Accounts.tsx:1254-1256`（OAuth 弹窗 step 2 提示）
-- Modify: `src-tauri/src/commands/accounts.rs:632`（refresh_jwt 报错）
+
+- Modify: `src-tauri/src/commands/accounts.rs:632`（refresh\_jwt 报错）
 
 - [ ] **Step 1: OAuth 弹窗 step 2 增加提示**
 
@@ -1106,7 +1126,7 @@ git commit -m "feat(browser-extract): 账户页浏览器提取入口与实时捕
             </p>
 ```
 
-- [ ] **Step 2: refresh_jwt 无 refresh_token 报错优化**
+- [ ] **Step 2: refresh\_jwt 无 refresh\_token 报错优化**
 
 [accounts.rs:628-632](d:\My_Codeproject\trae-daily\20260902-093039\TraeWorkAssistant-main\TraeWorkAssistant-main\src-tauri\src\commands\accounts.rs#L628-L632) 的：
 
@@ -1143,7 +1163,7 @@ git add src/pages/Accounts.tsx src-tauri/src/commands/accounts.rs
 git commit -m "feat(browser-extract): OAuth 卡认证中提示引导改用浏览器提取；优化刷新报错文案"
 ```
 
----
+***
 
 ### Task 9: 全链路验证
 
@@ -1152,7 +1172,7 @@ git commit -m "feat(browser-extract): OAuth 卡认证中提示引导改用浏览
 - [ ] **Step 1: Rust 全量测试**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml`
-Expected: 全部 PASS（含原有 35 个 + 新增 ~13 个 browser_extract 单测）
+Expected: 全部 PASS（含原有 35 个 + 新增 \~13 个 browser\_extract 单测）
 
 - [ ] **Step 2: Rust 编译检查**
 
@@ -1169,14 +1189,14 @@ Expected: 无错误
 1. 账户页出现「浏览器提取」按钮 → 点击打开弹窗
 2. 选择分组 →「启动提取浏览器」→ Edge/Chrome 打开并导航到 trae.cn，弹窗显示"监听中"
 3. 登录一个账号 → 弹窗实时出现捕获条目（新增徽标 + 有效期徽标），toast 提示
-4. 账户列表出现该账号，昵称来自 GetUserInfo（失败则 账号_xxxxxxxx）
+4. 账户列表出现该账号，昵称来自 GetUserInfo（失败则 账号\_xxxxxxxx）
 5. 浏览器内退出登录、登录第二个账号 → 第二条目捕获（验证多账号连续提取）
 6. 「完成并关闭」→ 浏览器优雅关闭（下次打开不弹"恢复页面"）
 7. 再次启动提取 → 免登录直接捕获（验证持久 profile 生效）
 8. 已存在账号重复提取 → 显示"更新"徽标而非新增
 9. 提取期间直接关闭弹窗（X）→ 浏览器同样被关闭
 10. 提取期间用户手动关掉浏览器 → 弹窗状态日志出现"浏览器已关闭"
-11. 应用运行中做提取 → 退出应用 → 浏览器进程被杀（任务管理器确认无孤儿 msedge/chrome 持有 browser_profile 目录）
+11. 应用运行中做提取 → 退出应用 → 浏览器进程被杀（任务管理器确认无孤儿 msedge/chrome 持有 browser\_profile 目录）
 12. OAuth 登录弹窗 step 2 出现"改用浏览器提取"提示
 
 - [ ] **Step 5: 记录验证结果，完成后提交（若有微调）**
@@ -1187,3 +1207,4 @@ git status
 git add -A
 git commit -m "fix(browser-extract): 验证期间修复（描述具体问题）"
 ```
+
