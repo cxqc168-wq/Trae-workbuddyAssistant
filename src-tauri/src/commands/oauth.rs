@@ -43,7 +43,7 @@ pub struct OAuthLoginResult {
 }
 
 /// 短请求 Agent
-fn short_agent() -> ureq::Agent {
+pub(crate) fn short_agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(120))
         .max_idle_connections(20)
