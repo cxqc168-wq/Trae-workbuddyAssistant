@@ -40,6 +40,9 @@
     "longDescription": "整合多账号签到、登录态切换、设备隔离与账号分组的 Windows 桌面端工具。",
     "publisher": "Trae Work 助手",
     "windows": {
+    "wix": {
+      "language": "zh-CN"
+    },
       "nsis": {
         "displayLanguageSelector": false,
         "languages": ["SimpChinese"]
