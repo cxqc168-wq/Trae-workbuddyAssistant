@@ -629,7 +629,7 @@ pub fn refresh_jwt(state: State<AppState>, user_id: String) -> Result<String, St
         .refresh_token
         .as_ref()
         .filter(|s| !s.is_empty())
-        .ok_or("该账号无 refresh_token，无法自动刷新")?;
+        .ok_or("该账号无 refresh_token（浏览器提取的账号不支持自动刷新），请用「浏览器提取」重新获取 JWT")?;
 
     // 调用 ExchangeToken API
     let resp = short_agent()

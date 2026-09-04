@@ -1264,6 +1264,9 @@ function OAuthLoginModal({
             <p className="mt-2 text-xs text-slate-400">
               授权完成后会自动填入。若浏览器未跳转或自动填充失败，可将地址栏完整 URL 手动复制粘贴到此处
             </p>
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              若长时间停留在「认证中」（常见于指纹浏览器代理、17388 端口被占用），请关闭本弹窗，改用「浏览器提取」登录
+            </p>
           </div>
         )}
 
