@@ -1311,6 +1311,7 @@ function BrowserExtractModal({
 }) {
   const toast = useAppStore((s) => s.pushToast);
   const refreshAccounts = useAppStore((s) => s.refreshAccounts);
+  const refreshGroups = useAppStore((s) => s.refreshGroups);
   const [starting, setStarting] = useState(false);
   const [running, setRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -1339,14 +1340,20 @@ function BrowserExtractModal({
       void listen<BrowserExtractProgress>('browser-extract-progress', (e) => {
         setLogs((ls) => [...ls, e.payload.message]);
         if (e.payload.type === 'exited') setRunning(false);
-      }).then((f) => unsubs.push(f));
+      }).then((f) => {
+        if (alive) unsubs.push(f);
+        else f();
+      });
       void listen<BrowserExtractCaptured>('browser-extract-captured', (e) => {
         setCaptured((cs) => [...cs, e.payload]);
         toast(
           'success',
           `已捕获账号 ${e.payload.name}（${e.payload.is_new ? '新增' : '更新'}）`,
         );
-      }).then((f) => unsubs.push(f));
+      }).then((f) => {
+        if (alive) unsubs.push(f);
+        else f();
+      });
     });
     return () => {
       alive = false;
@@ -1372,6 +1379,7 @@ function BrowserExtractModal({
     try {
       await api.browserExtract.stop();
       await refreshAccounts();
+      await refreshGroups();
     } catch (err) {
       toast('warn', `关闭提取浏览器失败：${String(err)}`);
     } finally {
