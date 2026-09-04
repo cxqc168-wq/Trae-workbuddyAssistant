@@ -212,6 +212,19 @@ export interface OAuthLoginResult {
   has_refresh_token: boolean;
 }
 
+// ---- 浏览器提取 JWT ----
+export interface BrowserExtractCaptured {
+  user_id: string;
+  name: string;
+  exp_hours: number | null;
+  is_new: boolean;
+}
+
+export interface BrowserExtractProgress {
+  type: 'started' | 'exited' | 'error';
+  message: string;
+}
+
 // ---- WorkBuddy ----
 export interface WorkBuddyAccountMeta {
   id: string;

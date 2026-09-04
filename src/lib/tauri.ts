@@ -145,6 +145,11 @@ export const api = {
     callbackStart: () => invoke('oauth_callback_start'),
     callbackStop: () => invoke('oauth_callback_stop'),
   },
+  browserExtract: {
+    start: (groupId?: string) =>
+      invoke('browser_extract_start', { groupId }),
+    stop: () => invoke('browser_extract_stop'),
+  },
   apiServer: {
     start: () => invoke<ApiServiceStatus>('api_server_start'),
     stop: () => invoke('api_server_stop'),
