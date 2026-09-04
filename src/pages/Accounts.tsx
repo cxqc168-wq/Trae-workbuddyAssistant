@@ -23,13 +23,14 @@ import {
   ExternalLink,
   ArrowRight,
   Save,
+  ScanSearch,
 } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import { Badge, EmptyState, Modal } from '../components/ui';
 import { save } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../store';
 import { api } from '../lib/tauri';
-import type { AccountView, GroupView, JwtParseResult, ProfileInfo } from '../types';
+import type { AccountView, BrowserExtractCaptured, BrowserExtractProgress, GroupView, JwtParseResult, ProfileInfo } from '../types';
 
 const PRESET_COLORS = [
   '#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#0ea5e9', '#a855f7', '#14b8a6',
@@ -125,6 +126,7 @@ export default function Accounts() {
   const [jwtTarget, setJwtTarget] = useState<AccountView | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [oauthOpen, setOAuthOpen] = useState(false);
+  const [extractOpen, setExtractOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
   const filtered = useMemo(() => {
@@ -197,6 +199,9 @@ export default function Accounts() {
             </button>
             <button onClick={() => setOAuthOpen(true)} className="btn-outline">
               <Globe size={15} /> OAuth 登录
+            </button>
+            <button onClick={() => setExtractOpen(true)} className="btn-outline" title="启动浏览器登录 trae.cn 并自动提取 JWT">
+              <ScanSearch size={15} /> 浏览器提取
             </button>
             <button onClick={() => setAddOpen(true)} className="btn-primary">
               <Plus size={15} /> 添加账号
@@ -451,6 +456,11 @@ export default function Accounts() {
             /* toast 已发出 */
           }
         }}
+      />
+      <BrowserExtractModal
+        open={extractOpen}
+        onClose={() => setExtractOpen(false)}
+        groups={groups}
       />
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
@@ -1282,6 +1292,186 @@ function OAuthLoginModal({
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function BrowserExtractModal({
+  open,
+  onClose,
+  groups,
+}: {
+  open: boolean;
+  onClose: () => void;
+  groups: GroupView[];
+}) {
+  const toast = useAppStore((s) => s.pushToast);
+  const refreshAccounts = useAppStore((s) => s.refreshAccounts);
+  const [starting, setStarting] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [captured, setCaptured] = useState<BrowserExtractCaptured[]>([]);
+  const [gid, setGid] = useState('');
+
+  useEffect(() => {
+    if (!open) {
+      setStarting(false);
+      setRunning(false);
+      setStopping(false);
+      setLogs([]);
+      setCaptured([]);
+      setGid('');
+    }
+  }, [open]);
+
+  // 监听后端事件：progress（状态日志）与 captured（捕获账号）
+  useEffect(() => {
+    if (!open) return;
+    const unsubs: Array<() => void> = [];
+    let alive = true;
+    void import('@tauri-apps/api/event').then(({ listen }) => {
+      if (!alive) return;
+      void listen<BrowserExtractProgress>('browser-extract-progress', (e) => {
+        setLogs((ls) => [...ls, e.payload.message]);
+        if (e.payload.type === 'exited') setRunning(false);
+      }).then((f) => unsubs.push(f));
+      void listen<BrowserExtractCaptured>('browser-extract-captured', (e) => {
+        setCaptured((cs) => [...cs, e.payload]);
+        toast(
+          'success',
+          `已捕获账号 ${e.payload.name}（${e.payload.is_new ? '新增' : '更新'}）`,
+        );
+      }).then((f) => unsubs.push(f));
+    });
+    return () => {
+      alive = false;
+      unsubs.forEach((f) => f());
+    };
+  }, [open, toast]);
+
+  const start = async () => {
+    setStarting(true);
+    try {
+      await api.browserExtract.start(gid || undefined);
+      setRunning(true);
+    } catch (err) {
+      toast('error', `启动提取浏览器失败：${String(err)}`);
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  // 关闭弹窗前必停浏览器：X/取消/完成共用此路径，防止孤儿进程
+  const finish = async () => {
+    setStopping(true);
+    try {
+      await api.browserExtract.stop();
+      await refreshAccounts();
+    } catch (err) {
+      toast('warn', `关闭提取浏览器失败：${String(err)}`);
+    } finally {
+      setStopping(false);
+      onClose();
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => void finish()}
+      title="浏览器提取 JWT"
+      footer={
+        <>
+          <button onClick={() => void finish()} className="btn-ghost" disabled={stopping}>
+            关闭
+          </button>
+          {!running && (
+            <button onClick={() => void start()} disabled={starting} className="btn-primary">
+              {starting ? '正在启动…' : captured.length > 0 ? '重新启动' : '启动提取浏览器'}
+            </button>
+          )}
+          {running && (
+            <button onClick={() => void finish()} className="btn-primary" disabled={stopping}>
+              {stopping ? '正在关闭…' : '完成并关闭'}
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {/* 步骤说明 */}
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          1. 点击「启动提取浏览器」——应用会打开一个专用浏览器窗口（登录态会保留，下次免登录）；
+          <br />
+          2. 在浏览器中登录 trae.cn，系统自动拦截登录凭证并保存为账号；
+          <br />
+          3. 多账号：在浏览器中退出当前账号、登录下一个，即可连续提取；
+          <br />
+          4. 全部完成后点击「完成并关闭」。适合 OAuth 授权页卡「认证中」时使用。
+        </div>
+
+        {/* 分组（启动前选择，仅对新增账号生效） */}
+        {!running && (
+          <div>
+            <label className="label">新账号分组（可选）</label>
+            <select value={gid} onChange={(e) => setGid(e.target.value)} className="input">
+              <option value="">不分组</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* 运行状态日志 */}
+        {(running || logs.length > 0) && (
+          <div>
+            <label className="label">状态</label>
+            <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-xs text-slate-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+              {running && (
+                <div className="flex items-center gap-2 text-brand-600 dark:text-brand-400">
+                  <Loader2 size={12} className="animate-spin" />
+                  监听中——请在浏览器登录 trae.cn…
+                </div>
+              )}
+              {logs.map((l, i) => (
+                <div key={i} className="text-slate-500 dark:text-zinc-400">
+                  {l}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 捕获列表 */}
+        {captured.length > 0 && (
+          <div>
+            <label className="label">本次捕获（{captured.length}）</label>
+            <div className="max-h-52 space-y-1.5 overflow-auto">
+              {captured.map((c, i) => (
+                <div
+                  key={`${c.user_id}-${i}`}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                >
+                  <div className="min-w-0">
+                    <span className="font-medium">{c.name}</span>
+                    <span className="ml-2 text-xs text-slate-400">{c.user_id}</span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge tone={c.is_new ? 'green' : 'blue'}>
+                      {c.is_new ? '新增' : '更新'}
+                    </Badge>
+                    <JwtStatusBadge hours={c.exp_hours} />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
