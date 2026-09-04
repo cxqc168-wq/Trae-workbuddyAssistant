@@ -185,14 +185,22 @@ pub async fn browser_extract_start(
         }
     };
 
-    // 4. 连接 CDP
-    let (browser, mut handler) = Browser::connect(ws_url)
-        .await
-        .map_err(|e| format!("连接浏览器调试协议失败：{e}"))?;
+    // 4. 连接 CDP（spawn 后所有失败路径统一走 cleanup_spawned：
+    //    杀子进程 + abort 已启动任务。tokio 默认 kill_on_drop=false，
+    //    仅 drop Child 不会终止进程；且持久 profile 下孤儿实例会抢占
+    //    --user-data-dir，导致后续 start 永远等不到调试端口而超时）
+    let mut tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let (browser, mut handler) = match Browser::connect(ws_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            cleanup_spawned(&mut child, &mut tasks).await;
+            return Err(format!("连接浏览器调试协议失败：{e}"));
+        }
+    };
 
     // handler 驱动任务：流结束 = 浏览器退出 → 通知前端
     let app_exit = app.clone();
-    let handler_task = tokio::spawn(async move {
+    tasks.push(tokio::spawn(async move {
         while let Some(h) = handler.next().await {
             if h.is_err() {
                 break;
@@ -202,17 +210,25 @@ pub async fn browser_extract_start(
             "browser-extract-progress",
             progress("exited", "浏览器已关闭，可重新启动提取"),
         );
-    });
-    let mut tasks = vec![handler_task];
+    }));
 
     // 5. 挂 Network 监听：命令行已带 trae.cn 首页，正常至少 1 个页面；
     //    极端时序下 pages 为空则主动开新页兜底
-    let mut pages = browser.pages().await.map_err(|e| format!("获取页面失败：{e}"))?;
+    let mut pages = match browser.pages().await {
+        Ok(p) => p,
+        Err(e) => {
+            cleanup_spawned(&mut child, &mut tasks).await;
+            return Err(format!("获取页面失败：{e}"));
+        }
+    };
     if pages.is_empty() {
-        let page = browser
-            .new_page("https://www.trae.cn/")
-            .await
-            .map_err(|e| format!("打开 trae.cn 失败：{e}"))?;
+        let page = match browser.new_page("https://www.trae.cn/").await {
+            Ok(p) => p,
+            Err(e) => {
+                cleanup_spawned(&mut child, &mut tasks).await;
+                return Err(format!("打开 trae.cn 失败：{e}"));
+            }
+        };
         pages = vec![page];
     }
 
@@ -316,6 +332,16 @@ pub async fn browser_extract_start(
     Ok(())
 }
 
+/// spawn 后中途失败的统一清理：杀浏览器子进程 + abort 已启动任务。
+/// 必须显式 kill——tokio 默认 kill_on_drop=false，drop Child 不会终止进程，
+/// 孤儿浏览器会一直占用持久 profile，导致后续 start 全部超时失败。
+async fn cleanup_spawned(child: &mut Child, tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
+    let _ = child.kill().await;
+    for t in tasks.drain(..) {
+        t.abort();
+    }
+}
+
 /// 轮询 CDP HTTP 端点直到浏览器就绪（15s 超时），返回 webSocketDebuggerUrl
 async fn wait_debug_endpoint(port: u16) -> Result<String, String> {
     let url = format!("http://127.0.0.1:{port}/json/version");
@@ -369,7 +395,7 @@ fn save_captured_account(
         .and_then(|(_, uname)| {
             if uname.trim().is_empty() { None } else { Some(uname) }
         })
-        .unwrap_or_else(|| format!("账号_{}", &user_id[..user_id.len().min(8)]));
+        .unwrap_or_else(|| format!("账号_{}", user_id.chars().take(8).collect::<String>()));
 
     accounts.accounts.push(RawAccount {
         name: name.clone(),
