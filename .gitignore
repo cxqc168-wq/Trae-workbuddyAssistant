@@ -14,6 +14,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# 逆向分析工作数据（严禁提交）
+.analysis/
+
 # WorkBuddy 自动产物（严禁提交）
 .workbuddy/
 
