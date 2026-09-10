@@ -69,6 +69,8 @@ interface AppState {
   savingLogin: string | null;
   deviceResetProgress: string[];
   deviceResetActive: boolean;
+  deviceCodeResetProgress: string[];
+  deviceCodeResetActive: boolean;
   checkin: CheckinState;
   toasts: Toast[];
   profiles: ProfileInfo[];
@@ -112,6 +114,7 @@ interface AppState {
   saveCurrentLogin: (userId: string) => Promise<void>;
   renewJwt: (userId: string) => Promise<void>;
   resetDeviceIds: () => Promise<void>;
+  resetDeviceCode: () => Promise<void>;
   startCheckin: (opts: {
     scope: string;
     user_ids?: string[];
@@ -182,6 +185,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   savingLogin: null,
   deviceResetProgress: [],
   deviceResetActive: false,
+  deviceCodeResetProgress: [],
+  deviceCodeResetActive: false,
   checkin: { active: false, total: 0, index: 0, results: [], done: null },
   toasts: [],
   profiles: [],
@@ -249,6 +254,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         get().pushToast(
           e.success ? 'success' : 'error',
           e.success ? '6 层设备标识重置完成' : '设备标识重置失败，请查看日志',
+        );
+      },
+      onDeviceCodeResetProgress: (line) =>
+        set((s) => ({
+          deviceCodeResetProgress: [...s.deviceCodeResetProgress.slice(-99), line],
+        })),
+      onDeviceCodeResetDone: (e) => {
+        set((s) => ({
+          deviceCodeResetActive: false,
+          deviceCodeResetProgress: [
+            ...s.deviceCodeResetProgress.slice(-99),
+            e.success ? '[完成] 设备码重置成功，请重新打开 Trae 并登录新账号' : '[失败] 设备码重置未完成，请查看日志',
+          ],
+        }));
+        get().pushToast(
+          e.success ? 'success' : 'error',
+          e.success ? '设备码重置完成' : '设备码重置失败，请查看日志',
         );
       },
       onProfileProgress: (line) =>
@@ -614,6 +636,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err) {
       set({ deviceResetActive: false });
       get().pushToast('error', `设备标识重置失败：${String(err)}`);
+    }
+  },
+  resetDeviceCode: async () => {
+    set({ deviceCodeResetActive: true, deviceCodeResetProgress: [] });
+    try {
+      await api.resetDeviceCode();
+      get().pushToast('info', '正在重置设备码…');
+    } catch (err) {
+      set({ deviceCodeResetActive: false });
+      get().pushToast('error', `设备码重置失败：${String(err)}`);
     }
   },
   startCheckin: async (opts) => {

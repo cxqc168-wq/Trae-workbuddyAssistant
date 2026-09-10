@@ -129,6 +129,7 @@ export const api = {
   switchAccount: (userId: string) => invoke('switch_account', { userId }),
   saveCurrentLogin: (userId: string) => invoke('save_current_login', { userId }),
   resetDeviceIds: () => invoke('reset_device_ids'),
+  resetDeviceCode: () => invoke('reset_device_code'),
   profiles: {
     list: () => invoke<ProfileInfo[]>('profile_list'),
     backup: (userId: string) => invoke('profile_backup', { userId }),
@@ -237,6 +238,10 @@ export interface DeviceResetDoneEvent {
   raw: string;
 }
 
+export interface DeviceCodeResetDoneEvent {
+  success: boolean;
+}
+
 export interface ProfileDoneEvent {
   success: boolean;
   raw: string;
@@ -253,6 +258,8 @@ export interface ListenerHandlers {
   onSaveLoginDone?: (e: SaveLoginDoneEvent) => void;
   onDeviceResetProgress?: (line: string) => void;
   onDeviceResetDone?: (e: DeviceResetDoneEvent) => void;
+  onDeviceCodeResetProgress?: (line: string) => void;
+  onDeviceCodeResetDone?: (e: DeviceCodeResetDoneEvent) => void;
   onProfileProgress?: (line: string) => void;
   onProfileDone?: (e: ProfileDoneEvent) => void;
 }
@@ -319,6 +326,20 @@ export async function setupListeners(
     unsubs.push(
       await listen<DeviceResetDoneEvent>('device-reset-done', (e) =>
         handlers.onDeviceResetDone!(e.payload),
+      ),
+    );
+  }
+  if (handlers.onDeviceCodeResetProgress) {
+    unsubs.push(
+      await listen<string>('device-code-reset-progress', (e) =>
+        handlers.onDeviceCodeResetProgress!(e.payload),
+      ),
+    );
+  }
+  if (handlers.onDeviceCodeResetDone) {
+    unsubs.push(
+      await listen<DeviceCodeResetDoneEvent>('device-code-reset-done', (e) =>
+        handlers.onDeviceCodeResetDone!(e.payload),
       ),
     );
   }

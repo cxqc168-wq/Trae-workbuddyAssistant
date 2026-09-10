@@ -303,3 +303,320 @@ pub fn reset_device_ids(
 
     Ok(())
 }
+
+// ==================== 重置设备码（TraeReset 工具复刻） ====================
+
+/// TraeReset 兼容的凭据键模糊匹配子串：storage.json 顶层键命中任一子串即删除（强制登出）。
+const AUTH_HINTS: [&str; 20] = [
+    "token", "auth", "cookie", "session", "account", "login", "userinfo", "userid",
+    "refresh", "access", "credential", "passwd", "signin", "oauth", "bearer",
+    "email", "phone", "avatar", "nickname", "member",
+];
+
+/// Trae 系列用户数据目录的候选名（对齐 TraeReset：Trae / Trae CN / TraeCN / TRAE SOLO CN）。
+const TRAE_DIR_NAMES: [&str; 4] = ["Trae", "Trae CN", "TraeCN", "TRAE SOLO CN"];
+
+/// 生成 uuid4 字符串（小写带连字符），等价 TraeReset 的 gen_uuid。
+fn tr_gen_uuid() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+/// 生成 64 位十六进制字符（等价 Python secrets.token_hex(32)），用于 telemetry.machineId。
+fn tr_gen_machine_id() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
+/// 生成大写带花括号 GUID，用于 telemetry.sqmId。
+fn tr_gen_guid() -> String {
+    format!("{{{}}}", uuid::Uuid::new_v4().to_string().to_uppercase())
+}
+
+/// 扫描存在的 Trae 系列用户数据目录（%APPDATA% 与 %LOCALAPPDATA%）。
+fn tr_find_trae_dirs() -> Vec<std::path::PathBuf> {
+    let mut bases: Vec<std::path::PathBuf> = Vec::new();
+    for var in ["APPDATA", "LOCALAPPDATA"] {
+        if let Ok(v) = std::env::var(var) {
+            if !v.is_empty() {
+                bases.push(std::path::PathBuf::from(v));
+            }
+        }
+    }
+    let home = std::path::PathBuf::from(
+        std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string()),
+    );
+    // 兜底：Linux/macOS 布局（与 TraeReset 一致），Windows 上通常不存在
+    bases.push(home.join(".config"));
+
+    let mut found = Vec::new();
+    for base in bases {
+        if !base.is_dir() {
+            continue;
+        }
+        for name in TRAE_DIR_NAMES {
+            let p = base.join(name);
+            if p.is_dir() {
+                found.push(p);
+            }
+        }
+    }
+    found
+}
+
+/// 检测 Trae 系列进程是否在运行：tasklist 优先，PowerShell Get-Process 兜底。
+/// 任一方式命中即视为运行中，避免受限环境下 tasklist 被拒后误判为"未运行"。
+fn tr_is_trae_running() -> bool {
+    // 1) tasklist
+    if let Ok(out) = Command::new("tasklist")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+    {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            return ["trae.exe", "trae cn", "trae solo"]
+                .iter()
+                .any(|t| text.contains(t));
+        }
+    }
+    // 2) PowerShell Get-Process 计数兜底
+    if let Ok(out) = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "(Get-Process -Name 'trae*' -ErrorAction SilentlyContinue | Measure-Object).Count",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(0x08000000)
+        .output()
+    {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if let Ok(n) = s.parse::<u32>() {
+                return n > 0;
+            }
+        }
+    }
+    false
+}
+
+/// 生成带时间戳的备份副本：<原路径>.traereset_bak_YYYYmmdd_HHMMSS
+fn tr_backup(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let bak = path.with_file_name(format!("{file_name}.traereset_bak_{ts}"));
+    std::fs::copy(path, &bak).map_err(|e| format!("备份失败: {e}"))?;
+    Ok(bak)
+}
+
+/// storage.json 候选路径（与 TraeReset 一致，按优先级取第一个存在的）。
+fn tr_find_storage_json(trae_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    [
+        trae_dir.join("User").join("globalStorage").join("storage.json"),
+        trae_dir.join("User").join("storage.json"),
+        trae_dir.join("storage.json"),
+    ]
+    .into_iter()
+    .find(|c| c.is_file())
+}
+
+/// 顶层键是否命中凭据子串（小写包含匹配）。
+fn tr_is_auth_key(key: &str) -> bool {
+    let k = key.to_lowercase();
+    AUTH_HINTS.iter().any(|h| k.contains(h))
+}
+
+/// 重置 machineid 文件：读旧值 → 写新 uuid4 → 返回 (旧, 新)。
+fn tr_reset_machineid(path: &std::path::Path) -> Result<(String, String), String> {
+    let old = std::fs::read_to_string(path)
+        .map_err(|e| format!("读取 machineid 失败: {e}"))?
+        .trim()
+        .to_string();
+    let new = tr_gen_uuid();
+    std::fs::write(path, &new).map_err(|e| format!("写入 machineid 失败: {e}"))?;
+    Ok((old, new))
+}
+
+/// 校验文件内容包含期望值（写入验证）。
+fn tr_verify(path: &std::path::Path, expected: &str) -> bool {
+    std::fs::read_to_string(path)
+        .map(|c| c.contains(expected))
+        .unwrap_or(false)
+}
+
+/// 重置 storage.json：
+/// 1) 删除全部命中 AUTH_HINTS 的顶层键（清除凭据、强制登出）
+/// 2) 重生成 telemetry.machineId / devDeviceId / sqmId
+/// 返回 (被删除的键, 新 telemetry ID)。
+fn tr_reset_storage(
+    path: &std::path::Path,
+) -> Result<(Vec<String>, [String; 3]), String> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| format!("读取 storage.json 失败: {e}"))?;
+    // utf-8-sig 容错：剥掉 BOM 后再解析
+    let text = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
+    let mut data: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(text).map_err(|e| format!("storage.json 解析失败: {e}"))?;
+
+    // 先收集再删除，避免迭代时修改
+    let removed: Vec<String> = data
+        .keys()
+        .filter(|k| tr_is_auth_key(k))
+        .cloned()
+        .collect();
+    for k in &removed {
+        data.remove(k);
+    }
+
+    let new_ids = [tr_gen_machine_id(), tr_gen_uuid(), tr_gen_guid()];
+    data.insert(
+        "telemetry.machineId".into(),
+        serde_json::Value::String(new_ids[0].clone()),
+    );
+    data.insert(
+        "telemetry.devDeviceId".into(),
+        serde_json::Value::String(new_ids[1].clone()),
+    );
+    data.insert(
+        "telemetry.sqmId".into(),
+        serde_json::Value::String(new_ids[2].clone()),
+    );
+
+    // 对齐 TraeReset 的 json.dump(indent=2, ensure_ascii=False)：serde_json 默认不转义非 ASCII
+    let out = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("序列化 storage.json 失败: {e}"))?;
+    std::fs::write(path, out).map_err(|e| format!("写入 storage.json 失败: {e}"))?;
+    Ok((removed, new_ids))
+}
+
+/// 重置设备码：TraeReset 工具的 Rust 原生复刻。
+/// 与「6 层重置」的区别——本功能额外清除 storage.json 全部凭据键（强制登出 Trae 内账号），
+/// 让服务端把本机识别为全新设备；仅操作用户数据文件，无需管理员权限。
+/// 后台线程执行，通过 device-code-reset-progress / device-code-reset-done 事件流式返回。
+#[tauri::command]
+pub fn reset_device_code(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    let data_dir = state.data_dir.clone();
+    fs_utils::app_log(&data_dir, "开始重置设备码（TraeReset 复刻）");
+
+    std::thread::spawn(move || {
+        let mut overall_ok = true;
+        let emit_line = |line: &str| {
+            let _ = app.emit("device-code-reset-progress", line);
+        };
+
+        let dirs = tr_find_trae_dirs();
+        if dirs.is_empty() {
+            overall_ok = false;
+            emit_line("[!] 未找到 Trae 用户数据目录。请确认 Trae 已安装。");
+        } else if tr_is_trae_running() {
+            overall_ok = false;
+            emit_line("[!] 检测到 Trae 正在运行，请先完全退出 Trae 后再重置。");
+        } else {
+            for trae_dir in &dirs {
+                emit_line(&format!("\n[目录] {}", trae_dir.display()));
+
+                let machineid_path = trae_dir.join("machineid");
+                let storage_path = tr_find_storage_json(trae_dir);
+
+                if !machineid_path.is_file() && storage_path.is_none() {
+                    emit_line("    - 未发现 machineid 或 storage.json，跳过。");
+                    continue;
+                }
+
+                // machineid：备份 → 换 uuid4 → 验证
+                if machineid_path.is_file() {
+                    let result = tr_backup(&machineid_path)
+                        .and_then(|bak| {
+                            let (old, new) = tr_reset_machineid(&machineid_path)?;
+                            let ok = tr_verify(&machineid_path, &new);
+                            Ok((bak, old, new, ok))
+                        });
+                    match result {
+                        Ok((bak, old, new, ok)) => {
+                            overall_ok = overall_ok && ok;
+                            emit_line(&format!(
+                                "    - machineid: {} -> {}  [{}]",
+                                if old.is_empty() { "(空)" } else { &old },
+                                new,
+                                if ok { "OK" } else { "FAIL" }
+                            ));
+                            emit_line(&format!("      备份: {}", bak.display()));
+                        }
+                        Err(e) => {
+                            overall_ok = false;
+                            emit_line(&format!("    - machineid 写入失败: {e}"));
+                        }
+                    }
+                }
+
+                // storage.json：备份 → 清凭据键 + 重生成 telemetry → 验证
+                if let Some(storage_path) = storage_path {
+                    let result = tr_backup(&storage_path)
+                        .and_then(|bak| tr_reset_storage(&storage_path).map(|r| (bak, r)));
+                    match result {
+                        Ok((bak, (removed, new_ids))) => {
+                            let ok = tr_verify(&storage_path, &new_ids[0])
+                                && tr_verify(&storage_path, &new_ids[1])
+                                && tr_verify(&storage_path, &new_ids[2]);
+                            overall_ok = overall_ok && ok;
+                            let removed_desc = if removed.is_empty() {
+                                "(无)".to_string()
+                            } else {
+                                format!("[{}]", removed.join(", "))
+                            };
+                            emit_line(&format!(
+                                "    - storage.json 已清除凭据键: {removed_desc}"
+                            ));
+                            let prefix = &new_ids[0][..new_ids[0].len().min(8)];
+                            emit_line(&format!(
+                                "    - telemetry.machineId : {prefix}... [{}]",
+                                if ok { "OK" } else { "FAIL" }
+                            ));
+                            emit_line(&format!(
+                                "    - telemetry.devDeviceId: {}",
+                                new_ids[1]
+                            ));
+                            emit_line(&format!(
+                                "    - telemetry.sqmId     : {}",
+                                new_ids[2]
+                            ));
+                            emit_line(&format!("      备份: {}", bak.display()));
+                        }
+                        Err(e) => {
+                            overall_ok = false;
+                            emit_line(&format!("    - storage.json 处理失败: {e}"));
+                        }
+                    }
+                }
+            }
+
+            if overall_ok {
+                emit_line("\n[完成] 设备码已重置。请重新打开 Trae 并登录新账号。");
+            } else {
+                emit_line("\n[警告] 部分步骤未完成，请查看上方日志。");
+            }
+        }
+
+        fs_utils::app_log(
+            &data_dir,
+            &format!(
+                "重置设备码结束: {}",
+                if overall_ok { "成功" } else { "存在失败" }
+            ),
+        );
+        let _ = app.emit(
+            "device-code-reset-done",
+            serde_json::json!({ "success": overall_ok }),
+        );
+    });
+
+    Ok(())
+}

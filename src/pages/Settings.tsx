@@ -1,5 +1,5 @@
-﻿import { useEffect, useState } from 'react';
-import { Calendar, Power, Trash2, Save, Search, RotateCcw, Fingerprint, RefreshCw, Clock, AlertTriangle } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Calendar, Power, Trash2, Save, Search, RotateCcw, Fingerprint, KeyRound, RefreshCw, Clock, AlertTriangle } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import { Badge, Modal } from '../components/ui';
 import { useAppStore } from '../store';
@@ -14,6 +14,9 @@ export default function Settings() {
   const resetDeviceIds = useAppStore((s) => s.resetDeviceIds);
   const deviceResetActive = useAppStore((s) => s.deviceResetActive);
   const deviceResetProgress = useAppStore((s) => s.deviceResetProgress);
+  const resetDeviceCode = useAppStore((s) => s.resetDeviceCode);
+  const deviceCodeResetActive = useAppStore((s) => s.deviceCodeResetActive);
+  const deviceCodeResetProgress = useAppStore((s) => s.deviceCodeResetProgress);
   const toast = useAppStore((s) => s.pushToast);
 
   const [time, setTime] = useState('09:00');
@@ -25,6 +28,7 @@ export default function Settings() {
   // 确认弹窗状态
   const [confirmUnregister, setConfirmUnregister] = useState(false);
   const [confirmResetDevice, setConfirmResetDevice] = useState(false);
+  const [confirmResetCode, setConfirmResetCode] = useState(false);
 
   // 本地表单状态：用户编辑后点击「保存」才持久化，避免每次按键都写文件
   const [form, setForm] = useState<SettingsType | null>(null);
@@ -133,6 +137,11 @@ export default function Settings() {
   const handleResetDeviceIds = async () => {
     setConfirmResetDevice(false);
     await resetDeviceIds();
+  };
+
+  const handleResetDeviceCode = async () => {
+    setConfirmResetCode(false);
+    await resetDeviceCode();
   };
 
   if (!form) {
@@ -255,6 +264,32 @@ export default function Settings() {
           {deviceResetProgress.length > 0 && (
             <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs dark:bg-zinc-950">
               {deviceResetProgress.join('\n')}
+            </pre>
+          )}
+
+          <div className="my-4 border-t border-slate-100 dark:border-zinc-800" />
+
+          <h3 className="mb-2 font-medium">重置设备码</h3>
+          <p className="mb-3 text-xs text-slate-500">
+            复刻「电脑设备码重置」工具：轮换 machineid 与 storage.json telemetry 标识，并
+            <span className="text-amber-500">清除全部登录凭据键（强制登出 Trae 内所有账号）</span>，
+            让服务端将本机识别为全新设备，适用于「设备数量已达上限」。自动生成带时间戳的备份，仅操作用户数据文件，无需管理员权限。
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setConfirmResetCode(true)}
+              disabled={deviceCodeResetActive}
+              className="btn-primary"
+            >
+              <KeyRound size={15} /> {deviceCodeResetActive ? '重置中…' : '重置设备码'}
+            </button>
+            {deviceCodeResetActive && (
+              <span className="text-xs text-amber-500 animate-pulse">正在执行，请勿关闭应用…</span>
+            )}
+          </div>
+          {deviceCodeResetProgress.length > 0 && (
+            <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs dark:bg-zinc-950">
+              {deviceCodeResetProgress.join('\n')}
             </pre>
           )}
 
@@ -491,6 +526,33 @@ export default function Settings() {
               <li>⑥ webview 追踪数据</li>
             </ul>
             <p className="mt-2 text-xs text-amber-500">建议先关闭 TRAE 再执行。</p>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 确认执行重置设备码 */}
+      <Modal
+        open={confirmResetCode}
+        onClose={() => setConfirmResetCode(false)}
+        title="确认重置设备码"
+        footer={
+          <>
+            <button className="btn-outline" onClick={() => setConfirmResetCode(false)}>取消</button>
+            <button className="btn-primary" onClick={() => void handleResetDeviceCode()}>确认重置</button>
+          </>
+        }
+      >
+        <div className="flex items-start gap-3">
+          <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+          <div>
+            <p>将对本机全部 Trae 系列目录执行：</p>
+            <ul className="mt-2 space-y-0.5 text-xs text-slate-400">
+              <li>· 轮换 machineid 与 storage.json telemetry 标识</li>
+              <li>· 清除 storage.json 全部登录凭据键（<span className="text-amber-500">强制登出所有账号</span>）</li>
+              <li>· 每个文件自动生成带时间戳的备份</li>
+            </ul>
+            <p className="mt-2 text-xs text-slate-400">仅操作用户数据文件，无需管理员权限。</p>
+            <p className="mt-2 text-xs text-amber-500">请先完全关闭 Trae 再执行；执行后需重新登录账号。</p>
           </div>
         </div>
       </Modal>

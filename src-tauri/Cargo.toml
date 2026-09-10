@@ -25,6 +25,7 @@ tokio-stream = "0.1"
 bytes = "1"
 sha2 = "0.10"
 rsa = { version = "0.9", features = ["pem", "sha2"] }
+uuid = { version = "1", features = ["v4"] }
 winreg = "0.52"
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures = "0.3"

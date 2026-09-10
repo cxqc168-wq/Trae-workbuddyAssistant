@@ -66,6 +66,7 @@ fn main() {
             commands::switch::switch_account,
             commands::switch::save_current_login,
             commands::switch::reset_device_ids,
+            commands::switch::reset_device_code,
             commands::misc::device_reset,
             commands::misc::jwt_parse,
             commands::misc::logs_query,
