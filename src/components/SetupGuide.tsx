@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { CheckCircle2, Circle, ChevronRight, Info } from 'lucide-react';
 import { useAppStore } from '../store';
 import { api } from '../lib/tauri';
@@ -22,6 +22,7 @@ export default function SetupGuide() {
   const startProxy = useAppStore((s) => s.startProxy);
   const refreshEnv = useAppStore((s) => s.refreshEnv);
   const refreshCert = useAppStore((s) => s.refreshCert);
+  const pushToast = useAppStore((s) => s.pushToast);
 
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -45,8 +46,16 @@ export default function SetupGuide() {
       done: certInstalled,
       actionLabel: '安装证书',
       run: async () => {
-        await api.cert.install();
-        await refreshCert();
+        try {
+          await api.cert.install();
+          await refreshCert();
+          pushToast('success', '证书安装成功');
+        } catch (e) {
+          // 失败原因（生成失败 / UAC 被拒 / 安装未生效）必须反馈给用户，
+          // 否则点击后无任何反应，用户无从得知失败原因
+          pushToast('error', `证书安装失败：${String(e)}`);
+          throw e; // 交给 handleRun 记录 console 日志
+        }
       },
     },
     {
