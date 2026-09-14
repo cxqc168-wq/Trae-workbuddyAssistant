@@ -1,6 +1,6 @@
 [package]
 name = "trae-work-assistant"
-version = "2.4.5"
+version = "2.4.6"
 description = "Trae Work 助手 - 多账号签到与管理桌面端"
 edition = "2021"
 rust-version = "1.77"

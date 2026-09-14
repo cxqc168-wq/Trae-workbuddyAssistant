@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib/tauri';
-import wechatQr from '../assets/wechat-qr.jpg';
+import qqGroupQr from '../assets/qq-group-qr.jpg';
 
 interface Props {
   onSuccess: () => void;
@@ -8,7 +8,7 @@ interface Props {
 
 /**
  * 授权激活门：license-guard 防护校验未通过时替换整个应用界面。
- * 关注公众号获取口令 -> 输入口令 -> 后端调用验证服务器换取凭证 -> 成功后放行主应用。
+ * 进入QQ群 -> 在群公告中获得口令 -> 输入口令 -> 后端调用验证服务器换取凭证 -> 成功后放行主应用。
  */
 export default function ActivationGate({ onSuccess }: Props) {
   const [code, setCode] = useState('');
@@ -44,18 +44,18 @@ export default function ActivationGate({ onSuccess }: Props) {
   return (
     <div className="flex h-full w-full items-center justify-center bg-slate-100 dark:bg-zinc-950">
       <div className="flex w-[640px] max-w-[92vw] flex-col gap-6 rounded-xl border border-slate-200 bg-white p-7 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row">
-        {/* 左：公众号引流 */}
+        {/* 左：QQ 群引流 */}
         <div className="flex flex-col items-center gap-3 sm:w-[220px]">
           <img
-            src={wechatQr}
-            alt="公众号二维码"
+            src={qqGroupQr}
+            alt="QQ群二维码"
             className="h-[200px] w-[200px] rounded-lg border border-slate-200 object-cover dark:border-zinc-700"
           />
           <div className="flex flex-col items-center gap-1">
             <p className="text-sm font-medium text-slate-800 dark:text-zinc-100">
-              关注公众号【极泊说】
+              进入QQ群
             </p>
-            <p className="text-xs text-slate-500 dark:text-zinc-400">获取软件激活口令</p>
+            <p className="text-xs text-slate-500 dark:text-zinc-400">在群公告中获得口令</p>
           </div>
         </div>
 
