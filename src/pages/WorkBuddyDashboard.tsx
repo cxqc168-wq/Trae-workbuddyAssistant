@@ -33,11 +33,12 @@ export default function WorkBuddyDashboard() {
     async (withToast: boolean) => {
       setLoading(true);
       try {
-        const [acc, cr] = await Promise.all([
-          api.workbuddy.listAccounts(),
-          api.workbuddy.credits().catch(() => null as WorkBuddyCreditSummary[] | null),
-        ]);
+        // 账号先渲染（本地读取秒出），积分随后异步到位（网络请求）
+        const acc = await api.workbuddy.listAccounts();
         setAccounts(acc);
+        const cr = await api.workbuddy
+          .credits(undefined, withToast)
+          .catch(() => null as WorkBuddyCreditSummary[] | null);
         setCredits(cr);
         if (withToast) toast('success', '已刷新');
       } catch (e) {

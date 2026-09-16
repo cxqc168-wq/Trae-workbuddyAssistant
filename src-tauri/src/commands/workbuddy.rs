@@ -101,15 +101,46 @@ pub fn workbuddy_checkin_all(app: AppHandle, account_ids: Option<Vec<String>>) -
     Ok(results)
 }
 
+/// 积分查询内存缓存：key(accountId 或 "*") → (查询时间戳, 结果)。
+/// 60 秒内复用，避免切页/重复点击反复打积分接口；force=true 时绕过缓存。
+fn credits_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, (i64, Vec<Value>)>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (i64, Vec<Value>)>>> =
+        std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+const CREDITS_CACHE_TTL_MS: i64 = 60_000;
+
 #[tauri::command(async)]
-pub fn workbuddy_credits(account_id: Option<String>) -> Result<Vec<Value>, String> {
+pub fn workbuddy_credits(account_id: Option<String>, force: Option<bool>) -> Result<Vec<Value>, String> {
     let accounts: Vec<Value> = load_all().into_iter()
         .filter(|a| account_id.as_deref().map_or(true, |id| a.get("id").and_then(|v| v.as_str()) == Some(id)))
         .collect();
     if accounts.is_empty() {
         return Err("没有匹配的账号".into());
     }
-    Ok(accounts.iter().map(credits::get_credit_expiry).collect())
+    let key = account_id.unwrap_or_else(|| "*".into());
+    let now = crate::workbuddy::now_ms();
+    if !force.unwrap_or(false) {
+        if let Some((ts, cached)) = credits_cache().lock().unwrap().get(&key).cloned() {
+            if now - ts < CREDITS_CACHE_TTL_MS {
+                return Ok(cached);
+            }
+        }
+    }
+    // 账号间并行查询（每个账号内部三接口已并行）：3 账号从串行 3RTT 降到 1RTT
+    let results: Vec<Value> = std::thread::scope(|s| {
+        let handles: Vec<_> = accounts
+            .iter()
+            .map(|a| s.spawn(|| credits::get_credit_expiry(a)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| json!({"ok": false, "error": "积分查询线程异常"})))
+            .collect()
+    });
+    credits_cache().lock().unwrap().insert(key, (now, results.clone()));
+    Ok(results)
 }
 
 #[tauri::command(async)]
