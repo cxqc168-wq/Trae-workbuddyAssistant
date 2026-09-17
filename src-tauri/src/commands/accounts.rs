@@ -736,6 +736,18 @@ pub fn build_account_views(state: &State<AppState>) -> Vec<AccountView> {
         .as_ref()
         .map(|t| t.starts_with(&fs_utils::today_prefix()))
         .unwrap_or(false);
+    // 服务器签到状态缓存（调度器/助手签到时写入）：{trae:{uid:{checked,date}},workbuddy:{id:{...}}}
+    let status_cache: serde_json::Value =
+        fs_utils::read_json(&state.path("checkin_status_cache.json"));
+    let today_prefix = fs_utils::today_prefix();
+    let cached_checked = |key: &str| -> Option<bool> {
+        status_cache
+            .get("trae")?
+            .get(key)?
+            .as_object()
+            .filter(|e| e.get("date").and_then(|v| v.as_str()) == Some(today_prefix.as_str()))
+            .and_then(|e| e.get("checked").and_then(|v| v.as_bool()))
+    };
     let checked_names: std::collections::HashSet<String> = if summary_today {
         summary
             .results
@@ -783,10 +795,16 @@ pub fn build_account_views(state: &State<AppState>) -> Vec<AccountView> {
         let device_mask = device_map
             .get(&uid)
             .map(|d: &DeviceEntry| fs_utils::mask(&d.device_id));
-        let checked = if summary_today {
-            checked_names.contains(&a.name)
-        } else {
-            false
+        // 今日已签判定：优先服务器状态缓存（当天），回退助手本地签到日志
+        let checked = match cached_checked(&uid) {
+            Some(c) => c,
+            None => {
+                if summary_today {
+                    checked_names.contains(&a.name)
+                } else {
+                    false
+                }
+            }
         };
         // 冷却状态：until > now 表示仍在冷却中（SessionDead 的 until=9999999999 始终 > now）
         let (cd_type, cd_until, cd_reason) = if let Some(entry) = cd.cooldowns.get(&uid) {

@@ -291,6 +291,24 @@ def _http_post(url, jwt, dev, body=b"{}", timeout=30):
         return -1, f"{type(e).__name__}: {e}"
 
 
+def save_status_cache(user_id, checked):
+    """把服务器返回的今日签到状态写入 checkin_status_cache.json，
+    供助手 UI 读取（修复：助手只看本地签到日志导致与服务器状态不同步）。"""
+    try:
+        path = os.path.join(DATA_DIR, "checkin_status_cache.json")
+        cache = load_json(path, {})
+        if not isinstance(cache, dict):
+            cache = {}
+        trae = cache.get("trae")
+        if not isinstance(trae, dict):
+            trae = {}
+        trae[str(user_id)] = {"checked": bool(checked), "date": time.strftime("%Y-%m-%d")}
+        cache["trae"] = trae
+        save_json(path, cache)
+    except Exception:
+        pass
+
+
 def status_check(name, jwt, device_map, timeout=30):
     """预检：返回 (ok: bool, checked_in: bool|None, credits: int|None, code: int|None, message: str)。"""
     user_id = extract_user_id(jwt)
@@ -310,6 +328,7 @@ def status_check(name, jwt, device_map, timeout=30):
     msg = data.get("message", "")
     if code != 0:
         return False, checked_in, credits, code, msg or f"HTTP {status}"
+    save_status_cache(user_id, bool(checked_in))
     return True, bool(checked_in), credits, code, msg
 
 
@@ -326,7 +345,10 @@ def signin(name, jwt, device_map, timeout=30):
         return False, body or "网络异常", None, status
     try:
         data = json.loads(body)
-        return data.get("code") == 0, data.get("message", f"HTTP {status}"), data.get("code"), status
+        ok = data.get("code") == 0
+        if ok or "已签到" in str(data.get("message", "")):
+            save_status_cache(user_id, True)
+        return ok, data.get("message", f"HTTP {status}"), data.get("code"), status
     except Exception:
         return False, f"HTTP {status}: 非 JSON 响应: {body[:200]}", status if status else None, status
 
