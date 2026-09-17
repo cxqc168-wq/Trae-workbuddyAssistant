@@ -10,9 +10,15 @@ pub const WORKBUDDY_API_ENDPOINT: &str = "https://www.codebuddy.cn";
 pub const WORKBUDDY_API_PREFIX: &str = "/v2/plugin";
 pub const CHECKIN_API_PREFIX: &str = "/v2/billing/meter";
 
+/// WorkBuddy 网关会校验 User-Agent：非浏览器/库默认 UA（如 ureq/x.y.z、
+/// Python-urllib/x.y）会被风控拒绝，返回 403 code=10085「请求不合法」。
+/// 必须显式携带浏览器风格 UA（实验验证：浏览器 UA 与自定义应用名 UA 均可通过）。
+const WORKBUDDY_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(20))
+        .user_agent(WORKBUDDY_USER_AGENT)
         .build()
 }
 

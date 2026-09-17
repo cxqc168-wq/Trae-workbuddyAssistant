@@ -185,7 +185,8 @@ export const api = {
     deleteAccount: (accountId: string) => invoke('workbuddy_delete_account', { accountId }),
     checkinStatus: (accountId: string) => invoke<{ ok: boolean; todayCheckedIn?: boolean; error?: string }>('workbuddy_checkin_status', { accountId }),
     checkinAll: (accountIds?: string[]) => invoke<WorkBuddyCheckinEntry[]>('workbuddy_checkin_all', { accountIds }),
-    credits: (accountId?: string) => invoke<WorkBuddyCreditSummary[]>('workbuddy_credits', { accountId }),
+    credits: (accountId?: string, force?: boolean) =>
+      invoke<WorkBuddyCreditSummary[]>('workbuddy_credits', { accountId, force }),
     refreshToken: (accountId: string) => invoke<WorkBuddyAccountMeta>('workbuddy_refresh_token', { accountId }),
     oauthStart: () => invoke<{ loginId: string; verificationUri: string; expiresIn: number }>('workbuddy_oauth_start'),
     oauthPoll: (loginId: string) => invoke<{ done: boolean; result?: WorkBuddyAccountMeta; error?: string }>('workbuddy_oauth_poll', { loginId }),

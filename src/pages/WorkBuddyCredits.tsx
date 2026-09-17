@@ -100,7 +100,7 @@ export default function WorkBuddyCredits() {
     }
     setCreditsLoading(true);
     try {
-      const data = await api.workbuddy.credits();
+      const data = await api.workbuddy.credits(undefined, true);
       setCreditsData(data);
       const okCount = data.filter((d) => d.ok).length;
       toast(okCount > 0 ? 'success' : 'warn', `已查询 ${okCount}/${data.length} 个账号的积分`);

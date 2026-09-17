@@ -390,7 +390,8 @@ fn retry_new_response_if_unauthorized(
 
 /// 统一惰性刷新后请求三类新资源接口；若任一路返回未授权，只刷新一次，
 /// 然后仅重试该分支，避免多路同时刷新并覆盖账号库中的 token。
-/// （样例为 tokio::join! 三路并行，本项目同步 HTTP 顺序调用，结果一致。）
+/// （官方样例为 tokio::join! 三路并行；这里用 std::thread::scope 实现同步并行，
+/// 每账号网络耗时从 3 个串行 RTT 降到 1 个 RTT，显著加快概览/积分页加载。）
 fn fetch_new_resource_responses(account: &Value) -> NewResourceResponses {
     let working_account = ensure_fresh_token(account.clone());
     let summary_url = new_resource_url(&working_account, RESOURCE_SUMMARY_PATH);
@@ -399,9 +400,22 @@ fn fetch_new_resource_responses(account: &Value) -> NewResourceResponses {
     let summary_body = json!({});
     let paid_body = paid_packages_body();
     let free_body = free_packages_body();
-    let summary = post_with_account(&working_account, &summary_url, summary_body.clone());
-    let paid = post_with_account(&working_account, &paid_url, paid_body.clone());
-    let free = post_with_account(&working_account, &free_url, free_body.clone());
+    let (summary, paid, free) = std::thread::scope(|s| {
+        let summary = s.spawn(|| post_with_account(&working_account, &summary_url, summary_body.clone()));
+        let paid = s.spawn(|| post_with_account(&working_account, &paid_url, paid_body.clone()));
+        let free = s.spawn(|| post_with_account(&working_account, &free_url, free_body.clone()));
+        (
+            summary
+                .join()
+                .unwrap_or_else(|_| json!({"code": -1, "message": "summary 请求线程异常"})),
+            paid
+                .join()
+                .unwrap_or_else(|_| json!({"code": -1, "message": "paid 请求线程异常"})),
+            free
+                .join()
+                .unwrap_or_else(|_| json!({"code": -1, "message": "free 请求线程异常"})),
+        )
+    });
 
     if !(is_unauthorized(&summary) || is_unauthorized(&paid) || is_unauthorized(&free)) {
         return NewResourceResponses {

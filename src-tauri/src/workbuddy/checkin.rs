@@ -81,10 +81,12 @@ fn checkin_request(path: &str, account: &Value) -> Value {
 pub fn get_checkin_status(account: &Value) -> Value {
     let resp = checkin_request(&format!("{CHECKIN_API_PREFIX}/checkin-activity-status"), account);
     if let Some(v) = status_from_response(&resp) {
+        write_status_from(account, &v);
         return v;
     }
     let resp2 = checkin_request(&format!("{CHECKIN_API_PREFIX}/checkin-status"), account);
     if let Some(v) = status_from_response(&resp2) {
+        write_status_from(account, &v);
         return v;
     }
     json!({
@@ -92,6 +94,15 @@ pub fn get_checkin_status(account: &Value) -> Value {
         "error": resp2.get("message").or_else(|| resp2.get("msg"))
             .and_then(|v| v.as_str()).unwrap_or("查询签到状态失败").to_string(),
     })
+}
+
+/// 状态查询成功后同步写缓存（供 checked_in_today 优先读取）。
+fn write_status_from(account: &Value, v: &Value) {
+    if let Some(id) = account.get("id").and_then(|s| s.as_str()) {
+        if let Some(c) = v.get("todayCheckedIn").and_then(|b| b.as_bool()) {
+            save_status_cache(id, c);
+        }
+    }
 }
 
 fn status_from_response(resp: &Value) -> Option<Value> {
@@ -126,11 +137,17 @@ fn checkin_result_from_response(resp: &Value) -> Result<bool, String> {
 /// 执行签到；"已签到"按成功。
 pub fn perform_checkin(account: &Value) -> Value {
     let resp = checkin_request(&format!("{CHECKIN_API_PREFIX}/daily-checkin"), account);
-    match checkin_result_from_response(&resp) {
+    let out = match checkin_result_from_response(&resp) {
         Ok(false) => json!({"ok": true}),
         Ok(true) => json!({"ok": true, "already": true, "message": "今日已签到"}),
         Err(e) => json!({"ok": false, "error": e}),
+    };
+    if out.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        if let Some(id) = account.get("id").and_then(|s| s.as_str()) {
+            save_status_cache(id, true);
+        }
     }
+    out
 }
 
 /// 状态三态判定。
@@ -249,13 +266,23 @@ pub fn checkin_all(ids: Option<&[String]>) -> Vec<Value> {
     checkin_all_with(ids, |_, _, _| {})
 }
 
-/// 今日是否已签（供账号列表展示）：该账号当天最新日志为 success/already。
+/// 今日是否已签（供账号列表展示）：优先服务器状态缓存（当天），回退本地日志 success/already。
 pub fn checked_in_today(account: &Value) -> bool {
     let id = match account.get("id").and_then(|v| v.as_str()) {
         Some(i) => i.to_string(),
         None => return false,
     };
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    // 优先：checkin_status_cache.json 的 workbuddy 段（调度器/签到时写入的服务器真实状态）
+    let cache: Value = crate::fs_utils::read_json(&super::store_path().join("checkin_status_cache.json"));
+    if let Some(c) = cache
+        .get("workbuddy")
+        .and_then(|m| m.get(&id))
+        .filter(|e| e.get("date").and_then(|v| v.as_str()) == Some(today.as_str()))
+        .and_then(|e| e.get("checked").and_then(|v| v.as_bool()))
+    {
+        return c;
+    }
     let logs = super::accounts::load_accounts_from_path(&super::store_path().join("workbuddy_checkin_logs.json"));
     logs.iter()
         .rev()
@@ -269,6 +296,21 @@ pub fn checked_in_today(account: &Value) -> bool {
         })
         .flatten()
         .is_some_and(|r| r == "success" || r == "already")
+}
+
+/// 把服务器返回的今日签到状态写入缓存（供助手 UI 与 Trae 共用同一缓存文件）。
+pub fn save_status_cache(account_id: &str, checked: bool) {
+    let path = super::store_path().join("checkin_status_cache.json");
+    let mut cache: Value = crate::fs_utils::read_json(&path);
+    if !cache.is_object() {
+        cache = json!({});
+    }
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    if cache.get("workbuddy").is_none() {
+        cache["workbuddy"] = json!({});
+    }
+    cache["workbuddy"][account_id] = json!({"checked": checked, "date": today});
+    let _ = crate::fs_utils::write_json(&path, &cache);
 }
 
 #[cfg(test)]
