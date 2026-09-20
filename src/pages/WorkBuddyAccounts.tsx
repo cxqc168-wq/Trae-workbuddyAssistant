@@ -7,8 +7,10 @@ import {
   Globe,
   Import,
   Loader2,
+  LogIn,
   Plus,
   RefreshCw,
+  Save,
   Trash2,
   Users,
   Zap,
@@ -338,6 +340,12 @@ function ExpireCell({ account }: { account: WorkBuddyAccountMeta }) {
 
 export default function WorkBuddyAccounts() {
   const toast = useAppStore((s) => s.pushToast);
+  // 登录态切换复用 Trae 侧同一套 store 动作；后端按 UserId 的 wb- 前缀分流到
+  // workbuddy-switch-bridge.ps1，流程与 Trae 账号完全一致。
+  const switchTo = useAppStore((s) => s.switchTo);
+  const switchingTo = useAppStore((s) => s.switchingTo);
+  const saveCurrentLogin = useAppStore((s) => s.saveCurrentLogin);
+  const savingLogin = useAppStore((s) => s.savingLogin);
 
   const [accounts, setAccounts] = useState<WorkBuddyAccountMeta[]>([]);
   const [loading, setLoading] = useState(false);
@@ -534,6 +542,52 @@ export default function WorkBuddyAccounts() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
+                        <button
+                          title={
+                            switchingTo
+                              ? switchingTo === a.id
+                                ? '切换中…'
+                                : '正在切换其他账号'
+                              : '切换到此账号：关闭并重启 WorkBuddy 客户端，只替换登录态，任务与历史记录全部保留'
+                          }
+                          onClick={() => void switchTo(a.id)}
+                          disabled={!!switchingTo || !!savingLogin}
+                          className={cn(
+                            'btn-ghost !p-2 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10',
+                            (switchingTo && switchingTo !== a.id) || savingLogin
+                              ? 'opacity-40 cursor-not-allowed'
+                              : '',
+                          )}
+                        >
+                          {switchingTo === a.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <LogIn size={14} />
+                          )}
+                        </button>
+                        <button
+                          title={
+                            savingLogin
+                              ? savingLogin === a.id
+                                ? '保存中…'
+                                : '正在保存其他账号'
+                              : '把当前客户端的登录态保存为该账号的快照（切换前每个账号需先保存一次）'
+                          }
+                          onClick={() => void saveCurrentLogin(a.id)}
+                          disabled={!!switchingTo || !!savingLogin}
+                          className={cn(
+                            'btn-ghost !p-2 text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-500/10',
+                            (savingLogin && savingLogin !== a.id) || switchingTo
+                              ? 'opacity-40 cursor-not-allowed'
+                              : '',
+                          )}
+                        >
+                          {savingLogin === a.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Save size={14} />
+                          )}
+                        </button>
                         <button
                           title={a.hasRefreshToken ? '刷新 token' : '刷新 token（无 refresh_token，可能失败）'}
                           onClick={() => void onRefreshToken(a)}

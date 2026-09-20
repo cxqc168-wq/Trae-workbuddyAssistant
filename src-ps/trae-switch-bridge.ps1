@@ -534,6 +534,27 @@ try {
         Write-Step -Stage 'init' -Message '缺少 -UserId 参数' -Status 'error'
         exit 1
     }
+
+    # ============ WorkBuddy 账号切换分流（补丁新增） ============
+    # 前端「账号管理 → WorkBuddy」页的「切换 / 保存登录态」按钮复用同一条 IPC 通道
+    # （switch_account / save_current_login），这里按 UserId 前缀（wb-）分流到
+    # workbuddy-switch-bridge.ps1：关客户端 → 只换登录凭证层 → 重启客户端，
+    # WorkBuddy 的任务记录与历史数据完全不动。
+    # 非 wb- 前缀的 UserId 仍走原本的 TRAE 逻辑，行为完全不变。
+    if ($UserId -and $UserId -like 'wb-*') {
+        $wbBridge = Join-Path $PSScriptRoot 'workbuddy-switch-bridge.ps1'
+        if (-not (Test-Path -LiteralPath $wbBridge)) {
+            Write-Step -Stage 'fatal' -Message "找不到 WorkBuddy 切换脚本: $wbBridge" -Status 'error'
+            exit 1
+        }
+        $psExe = Join-Path $PSHOME 'powershell.exe'
+        if (-not (Test-Path -LiteralPath $psExe)) { $psExe = 'powershell.exe' }
+        $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $wbBridge, '-Action', $Action, '-UserId', $UserId)
+        if ($Json) { $childArgs += '-Json' }
+        & $psExe @childArgs
+        exit $LASTEXITCODE
+    }
+
     Write-Step -Stage 'init' -Message "开始操作: $Action (userId=$UserId)" -Status 'info'
 
     switch ($Action) {

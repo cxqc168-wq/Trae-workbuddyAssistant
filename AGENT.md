@@ -70,7 +70,9 @@ trae-work-assistant/
 │   ├── auto_checkin.py           # 批量签到（--json-stream / --accounts / --scope）
 │   ├── requirements.txt          # cryptography
 │   └── tests/test_auto_checkin.py
-└── src-ps/trae-switch-bridge.ps1 # 非交互切换桥 + NDJSON 步骤输出
+└── src-ps/                       # 非交互切换桥 + NDJSON 步骤输出
+    ├── trae-switch-bridge.ps1       # Trae 侧（精准备份 9 类核心登录文件）
+    └── workbuddy-switch-bridge.ps1  # WorkBuddy 侧（单文件登录态，见 §8.1）
 ```
 
 ## 5. Tauri 命令契约
@@ -148,6 +150,21 @@ trae-work-assistant/
 - **Switch 流程**：预检查目标快照 → 关闭 Trae Work → 保存当前到 last + 当前账号槽位 → 恢复目标 → 启动。
 - **SaveCurrentLogin 流程**：关闭 Trae Work → 精准备份到 userId 槽位 → 启动。
 - storage.json 路径：`User\globalStorage\storage.json`，键名用点号访问（`$storage.'telemetry.machineId'`）。
+
+### 8.1 WorkBuddy 切换分流
+
+- **分流规则**：`trae-switch-bridge.ps1` 收到 `-UserId wb-*` 时，把 `-Action` / `-UserId` / `-Json` 原样透传给同目录的 `workbuddy-switch-bridge.ps1`；非 `wb-` 前缀仍走 Trae 逻辑，行为不变。Rust 侧 `switch_account` / `save_current_login` 无需改动。
+- **与 Trae 的本质差异**：Trae 登录态分散在 9 类 Chromium 文件里，所以需要「精准备份」；**WorkBuddy 的登录态只有 1 个明文 JSON 文件**——
+  `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info`
+  （依据：WorkBuddy 自身 `app.asar` → `main/file-authentication-storage.js` → `getAuthSavePath()`，
+  即 `path.join(filePathService.sharedDataPath, "auth", "workbuddy-desktop.info")`）。
+  结构：`{ account:{uid,nickname,…}, auth:{accessToken,refreshToken,…}, accounts:[…], allAccounts:[…] }`。
+- **登出标记**：同目录若存在 `<该文件>.logged-out`，应用会**主动忽略**登录态文件（源码 `hasLogoutMarker()`）→ 切换前必须清除。
+- **切换语义**：只替换该文件 + 清登出标记，**不碰任务、会话、项目与历史记录**——应用本就只从这一个文件读身份。
+- **Action 参数**：`Switch` / `SaveCurrentLogin` / `BackupCurrent` / `RestoreOnly` / `ShowPaths` / `ListProfiles` / `Fingerprint` / `SeedAuthSnapshots`。
+- **uid 映射**：账号行 ID（`wb-xxx`）经 `%APPDATA%\TraeWorkAssistant\data\workbuddy_accounts.json` 映射到真实 uid；写入前校验「当前登录 uid == 目标行 uid」，不一致直接拒绝（防止存成别人的快照）。
+- **fs.watch 提醒**：应用对 auth 目录装了 `fs.watch`，外部改写会被核对；桥仍走「关客户端 → 写 → 重启」的确定路径。
+- ⚠️ **写入坑**：`[IO.File]::Replace($tmp, $path, $null)` 在 PS 5.1 下会因 `$null` 隐式转成 `""` 而抛「路径的形式不合法」——第三参数必须传真实备份路径。
 
 ## 9. Python 约定
 
