@@ -4,6 +4,27 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **WorkBuddy 登录态切换**：账号管理页行内新增「切换到此账号」（绿）与「保存登录态」（紫）两个按钮，能力与 Trae 模块对齐；可切换中/保存中状态互斥禁用。
+- 新增 `src-ps/workbuddy-switch-bridge.ps1` 切换桥：
+  - 登录态来源为客户端真实凭证文件 `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info`（明文 JSON，含 `account` / `auth` / `accounts`）；切换仅替换该文件并清除 `.logged-out` 登出标记，**不动任务、会话、项目与历史记录**；
+  - `-UserId`（`wb-xxx`）经 `%APPDATA%\TraeWorkAssistant\data\workbuddy_accounts.json` 映射为真实 uid，写入前校验「当前登录 uid == 目标 uid」，不一致即拒绝；
+  - 动作：`Switch` / `SaveCurrentLogin` / `BackupCurrent` / `RestoreOnly` / `ShowPaths` / `ListProfiles` / `Fingerprint` / `SeedAuthSnapshots`。
+- `src-ps/trae-switch-bridge.ps1` 增加分流：`-UserId` 为 `wb-` 前缀时转交 WorkBuddy 桥（透传 Action / UserId / Json），非 `wb-` 前缀行为不变。
+
+### 变更
+
+- WorkBuddy 积分页账号卡片改为可折叠：默认收起为一行摘要（账号名 + 剩余/总量 + 百分比 + 更新时间），展开显示额度详情，卡内「资源明细」再作二级折叠，账号较多时首屏更紧凑。
+
+### 说明
+
+- 实现提示：切换桥用 `[IO.File]::Replace` 原子写入时，第三参数必须传真实备份路径——PowerShell 5.1 会把 `$null` 隐式转换成空字符串并抛「路径的形式不合法」。
+
+---
+
 ## [2.4.6] - 2026-09-14
 
 激活门口令获取渠道由公众号切换为 QQ 群。
