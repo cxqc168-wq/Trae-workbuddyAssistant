@@ -172,6 +172,7 @@ use std::sync::{Arc, Mutex};
 
 use chromiumoxide::Browser;
 use chromiumoxide::cdp::browser_protocol::network::{EnableParams, EventRequestWillBeSent};
+use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
 use futures::StreamExt;
 use serde_json::json;
 use tauri::{Emitter, Manager, State};
@@ -209,6 +210,12 @@ fn progress(kind: &str, message: &str) -> serde_json::Value {
     json!({ "type": kind, "message": message })
 }
 
+const STEALTH_SCRIPT: &str = r#"
+Object.defineProperty(navigator, 'webdriver', {
+    get: () => undefined
+});
+"#;
+
 /// 为指定页面挂载 Network 监听，拦截 trae API 请求的 Authorization 头
 fn attach_page_network_listener(
     page: chromiumoxide::Page,
@@ -218,6 +225,7 @@ fn attach_page_network_listener(
     tasks: &mut Vec<tokio::task::JoinHandle<()>>,
 ) {
     tasks.push(tokio::spawn(async move {
+        let _ = page.execute(AddScriptToEvaluateOnNewDocumentParams::new(STEALTH_SCRIPT)).await;
         if page.execute(EnableParams::default()).await.is_err() {
             return;
         }
@@ -357,10 +365,13 @@ pub async fn browser_extract_start(
     cmd.arg(format!("--remote-debugging-port={port}"))
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
+        .arg("--disable-blink-features=AutomationControlled")
+        .arg("--remote-allow-origins=*")
+        .arg("--lang=zh-CN")
         .arg(format!("--user-data-dir={}", temp_profile.display()))
-        .arg("https://www.trae.cn/");
-    #[cfg(windows)]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW，防控制台闪烁
+        // 绕过本地 MITM 代理对字节安全/登录域名的拦截，防自签证书被 MSSDK 检测导致 Token 无效
+        .arg("--proxy-bypass-list=*.trae.cn;*.trae.com.cn;*.bytedance.com;*.zijieapi.com;*.bytetos.com;*.snssdk.com;127.0.0.1;localhost")
+        .arg("https://www.trae.cn/login");
     let mut child = cmd
         .spawn()
         .map_err(|e| {
@@ -417,11 +428,11 @@ pub async fn browser_extract_start(
         }
     };
     if pages.is_empty() {
-        let page = match browser.new_page("https://www.trae.cn/").await {
+        let page = match browser.new_page("https://www.trae.cn/login").await {
             Ok(p) => p,
             Err(e) => {
                 cleanup_spawned(&mut child, &mut tasks, &temp_profile).await;
-                return Err(format!("打开 trae.cn 失败：{e}"));
+                return Err(format!("打开 trae.cn/login 失败：{e}"));
             }
         };
         pages = vec![page];
@@ -458,7 +469,7 @@ pub async fn browser_extract_start(
         progress(
             "started",
             &format!(
-                "已启动 {}（调试端口 {}），请在打开的页面中登录 trae.cn",
+                "已启动 {}（调试端口 {}），请在打开的登录页面中登录",
                 browser_path.display(),
                 port
             ),

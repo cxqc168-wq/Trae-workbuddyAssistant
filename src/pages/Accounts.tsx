@@ -248,140 +248,142 @@ export default function Accounts() {
             />
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-zinc-900">
-              <tr>
-                <th className="px-4 py-2 text-left">账号</th>
-                <th className="px-4 py-2 text-left">分组</th>
-                <th className="px-4 py-2 text-left">JWT</th>
-                <th className="px-4 py-2 text-left">设备 ID</th>
-                <th className="px-4 py-2 text-left">今日</th>
-                <th className="px-4 py-2 text-left">冷却</th>
-                <th className="px-4 py-2 text-right">剩余积分</th>
-                <th className="px-4 py-2 text-left">积分过期</th>
-                <th className="px-4 py-2 text-right">今日新增积分</th>
-                <th className="px-4 py-2 text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((a) => {
-                return (
-                  <tr key={a.user_id} className="border-t border-slate-200 dark:border-zinc-800">
-                    <td className="px-4 py-3">
-                      <div className="font-medium">{a.name}</div>
-                      <div className="text-xs text-slate-400">{a.user_id}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <GroupSelect
-                        value={a.group_id}
-                        groups={groups}
-                        onChange={(gid) => void moveAccount(a.user_id, gid)}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <JwtStatusBadge hours={a.jwt_exp_hours} />
-                        {a.has_refresh_token && (
-                          <span title="支持自动刷新" className="text-sky-500">
-                            <Zap size={12} />
-                          </span>
-                        )}
-                        <button
-                          title="查看 JWT"
-                          onClick={() => setJwtTarget(a)}
-                          className="btn-ghost !p-1"
-                        >
-                          <Eye size={13} />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">{a.device_id_masked ?? '-'}</td>
-                    <td className="px-4 py-3">
-                      {a.checked_today ? (
-                        <Badge tone="green">已签</Badge>
-                      ) : (
-                        <Badge tone="slate">未签</Badge>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {a.cooldown_type ? (
-                        <CooldownBadge type={a.cooldown_type} until={a.cooldown_until} />
-                      ) : (
-                        <span className="text-xs text-slate-300">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {a.remaining_credits != null
-                        ? a.remaining_credits.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
-                        : '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <CreditsExpireBadge expireAt={a.credits_expire_at} />
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {a.credits != null ? a.credits.toLocaleString() : '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <button title="编辑账号" onClick={() => setEditTarget(a)} className="btn-ghost !p-2">
-                          <Pencil size={14} />
-                        </button>
-                        {a.cooldown_type && (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1080px] text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-zinc-900">
+                <tr>
+                  <th className="px-4 py-2 text-left whitespace-nowrap">账号</th>
+                  <th className="px-4 py-2 text-left whitespace-nowrap">分组</th>
+                  <th className="px-4 py-2 text-left whitespace-nowrap">JWT</th>
+                  <th className="px-4 py-2 text-left whitespace-nowrap">设备 ID</th>
+                  <th className="px-4 py-2 text-left whitespace-nowrap">今日</th>
+                  <th className="px-4 py-2 text-left whitespace-nowrap">冷却</th>
+                  <th className="px-4 py-2 text-right whitespace-nowrap">剩余积分</th>
+                  <th className="px-4 py-2 text-left whitespace-nowrap">积分过期</th>
+                  <th className="px-4 py-2 text-right whitespace-nowrap">今日新增积分</th>
+                  <th className="px-4 py-2 text-right whitespace-nowrap">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((a) => {
+                  return (
+                    <tr key={a.user_id} className="border-t border-slate-200 dark:border-zinc-800">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="font-medium">{a.name}</div>
+                        <div className="text-xs text-slate-400">{a.user_id}</div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <GroupSelect
+                          value={a.group_id}
+                          groups={groups}
+                          onChange={(gid) => void moveAccount(a.user_id, gid)}
+                        />
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <JwtStatusBadge hours={a.jwt_exp_hours} />
+                          {a.has_refresh_token && (
+                            <span title="支持自动刷新" className="text-sky-500">
+                              <Zap size={12} />
+                            </span>
+                          )}
                           <button
-                            title="解除冷却"
-                            onClick={() => void cooldownClear(a.user_id)}
-                            className="btn-ghost !p-2 text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-500/10"
+                            title="查看 JWT"
+                            onClick={() => setJwtTarget(a)}
+                            className="btn-ghost !p-1"
                           >
-                            <Snowflake size={14} />
+                            <Eye size={13} />
                           </button>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">{a.device_id_masked ?? '-'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {a.checked_today ? (
+                          <Badge tone="green">已签</Badge>
+                        ) : (
+                          <Badge tone="slate">未签</Badge>
                         )}
-                        {(a.jwt_exp_hours === null || a.jwt_exp_hours <= 24) && (
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {a.cooldown_type ? (
+                          <CooldownBadge type={a.cooldown_type} until={a.cooldown_until} />
+                        ) : (
+                          <span className="text-xs text-slate-300">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                        {a.remaining_credits != null
+                          ? a.remaining_credits.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+                          : '-'}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <CreditsExpireBadge expireAt={a.credits_expire_at} />
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                        {a.credits != null ? a.credits.toLocaleString() : '-'}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex justify-end gap-1">
+                          <button title="编辑账号" onClick={() => setEditTarget(a)} className="btn-ghost !p-2">
+                            <Pencil size={14} />
+                          </button>
+                          {a.cooldown_type && (
+                            <button
+                              title="解除冷却"
+                              onClick={() => void cooldownClear(a.user_id)}
+                              className="btn-ghost !p-2 text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-500/10"
+                            >
+                              <Snowflake size={14} />
+                            </button>
+                          )}
+                          {(a.jwt_exp_hours === null || a.jwt_exp_hours <= 24) && (
+                            <button
+                              title="续期 JWT（启动代理并切换账号）"
+                              onClick={() => void renewJwt(a.user_id)}
+                              className="btn-ghost !p-2 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10"
+                            >
+                              <KeyRound size={14} />
+                            </button>
+                          )}
+                          {a.has_refresh_token && (
+                            <button
+                              title="刷新 JWT"
+                              onClick={() => void refreshJwt(a.user_id)}
+                              className="btn-ghost !p-2 text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-500/10"
+                            >
+                              <Zap size={14} />
+                            </button>
+                          )}
                           <button
-                            title="续期 JWT（启动代理并切换账号）"
-                            onClick={() => void renewJwt(a.user_id)}
-                            className="btn-ghost !p-2 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10"
+                            title={switchingTo ? (switchingTo === a.user_id ? '切换中…' : '正在切换其他账号') : '切换到此账号（JWT 注入）'}
+                            onClick={() => void switchTo(a.user_id)}
+                            disabled={!!switchingTo || !!savingLogin}
+                            className={`btn-ghost !p-2 ${switchingTo === a.user_id ? 'text-amber-500' : ''} ${(switchingTo && switchingTo !== a.user_id) || savingLogin ? 'opacity-40 cursor-not-allowed' : ''}`}
                           >
-                            <KeyRound size={14} />
+                            {switchingTo === a.user_id ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
                           </button>
-                        )}
-                        {a.has_refresh_token && (
                           <button
-                            title="刷新 JWT"
-                            onClick={() => void refreshJwt(a.user_id)}
-                            className="btn-ghost !p-2 text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-500/10"
+                            title={savingLogin ? (savingLogin === a.user_id ? '保存中…' : '正在保存其他账号') : '保存当前登录态'}
+                            onClick={() => void saveCurrentLogin(a.user_id)}
+                            disabled={!!switchingTo || !!savingLogin}
+                            className={`btn-ghost !p-2 ${savingLogin === a.user_id ? 'text-amber-500' : ''} ${(savingLogin && savingLogin !== a.user_id) || switchingTo ? 'opacity-40 cursor-not-allowed' : ''}`}
                           >
-                            <Zap size={14} />
+                            {savingLogin === a.user_id ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                           </button>
-                        )}
-                        <button
-                          title={switchingTo ? (switchingTo === a.user_id ? '切换中…' : '正在切换其他账号') : '切换到此账号（JWT 注入）'}
-                          onClick={() => void switchTo(a.user_id)}
-                          disabled={!!switchingTo || !!savingLogin}
-                          className={`btn-ghost !p-2 ${switchingTo === a.user_id ? 'text-amber-500' : ''} ${(switchingTo && switchingTo !== a.user_id) || savingLogin ? 'opacity-40 cursor-not-allowed' : ''}`}
-                        >
-                          {switchingTo === a.user_id ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
-                        </button>
-                        <button
-                          title={savingLogin ? (savingLogin === a.user_id ? '保存中…' : '正在保存其他账号') : '保存当前登录态'}
-                          onClick={() => void saveCurrentLogin(a.user_id)}
-                          disabled={!!switchingTo || !!savingLogin}
-                          className={`btn-ghost !p-2 ${savingLogin === a.user_id ? 'text-amber-500' : ''} ${(savingLogin && savingLogin !== a.user_id) || switchingTo ? 'opacity-40 cursor-not-allowed' : ''}`}
-                        >
-                          {savingLogin === a.user_id ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                        </button>
-                        <button title="重置设备 ID" onClick={() => void resetDevice(a.user_id)} className="btn-ghost !p-2">
-                          <RotateCcw size={14} />
-                        </button>
-                        <button title="删除" onClick={() => void onDelete(a)} className="btn-ghost !p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          <button title="重置设备 ID" onClick={() => void resetDevice(a.user_id)} className="btn-ghost !p-2">
+                            <RotateCcw size={14} />
+                          </button>
+                          <button title="删除" onClick={() => void onDelete(a)} className="btn-ghost !p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -1472,13 +1474,11 @@ function BrowserExtractModal({
       <div className="space-y-4">
         {/* 步骤说明 */}
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-          1. 点击「启动提取浏览器」——应用会打开一个纯净的内置浏览器窗口；
+          1. 点击「启动提取浏览器」——应用会自动打开内置浏览器并直达 Trae 登录页；
           <br />
-          2. 请在弹出的浏览器页面中完成账号登录，系统将在您登录成功瞬间自动捕获 JWT 并保存为账号；
+          2. 请在弹出的浏览器页面中完成账号登录，系统将在您登录成功瞬间自动抓取 JWT 并自动关闭浏览器保存账号；
           <br />
-          3. 如需提取多个账号，在浏览器中退出登录并换号登录即可连续捕获；
-          <br />
-          4. 捕获完成后点击「完成并关闭」。适合 OAuth 授权页卡「认证中」时使用。
+          3. 若需要提取多个账号，点击「重新启动」重复上述操作即可。
         </div>
 
         {/* 分组（启动前选择，仅对新增账号生效） */}
