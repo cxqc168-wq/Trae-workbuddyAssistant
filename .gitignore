@@ -58,3 +58,7 @@ overview.md
 # license-guard 实验性许可证系统（不随仓库开源）
 license-guard/
 .pytest_cache/
+
+# Playwright Chromium 二进制（随安装包/便携版打包，排除在 git 之外）
+resources/browser/*
+!resources/browser/.gitkeep

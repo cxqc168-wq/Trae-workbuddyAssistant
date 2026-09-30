@@ -8,6 +8,8 @@ mod license_guard;
 mod models;
 mod python;
 mod state;
+mod trae_auth;
+mod trae_session;
 mod workbuddy;
 mod api_server;
 
@@ -67,6 +69,9 @@ fn main() {
             commands::switch::save_current_login,
             commands::switch::reset_device_ids,
             commands::switch::reset_device_code,
+            commands::switch::list_snapshots,
+            commands::trae_auth::trae_switch_account,
+            commands::trae_auth::trae_save_current_login,
             commands::misc::device_reset,
             commands::misc::jwt_parse,
             commands::misc::logs_query,
@@ -114,6 +119,19 @@ fn main() {
             commands::workbuddy::workbuddy_refresh_token,
             commands::workbuddy::workbuddy_oauth_start,
             commands::workbuddy::workbuddy_oauth_poll,
+            commands::workbuddy_session::wb_auth_list,
+            commands::workbuddy_session::wb_auth_current,
+            commands::workbuddy_session::wb_auth_backup_current,
+            commands::workbuddy_session::wb_switch_account,
+            commands::workbuddy_session::wb_session_list,
+            commands::workbuddy_session::wb_session_copy,
+            commands::workbuddy_session::wb_session_migrate_all,
+            commands::workbuddy_session::wb_session_job_status,
+            commands::workbuddy_session::wb_session_lineage_normalize,
+            commands::workbuddy_session::wb_session_export,
+            commands::workbuddy_session::wb_session_import,
+            commands::trae_session::trae_session_list,
+            commands::trae_session::trae_session_export_messages,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

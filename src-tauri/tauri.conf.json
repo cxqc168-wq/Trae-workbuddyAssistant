@@ -34,7 +34,8 @@
     "icon": ["icons/icon.ico"],
     "resources": {
       "../src-python/": "python/",
-      "../src-ps/": "ps/"
+      "../src-ps/": "ps/",
+      "../resources/browser/": "browser/"
     },
     "shortDescription": "Trae Work 多账号签到与管理助手",
     "longDescription": "整合多账号签到、登录态切换、设备隔离与账号分组的 Windows 桌面端工具。",

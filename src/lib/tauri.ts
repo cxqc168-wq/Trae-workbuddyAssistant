@@ -22,6 +22,12 @@ import type {
   WorkBuddyAccountMeta,
   WorkBuddyCheckinEntry,
   WorkBuddyCreditSummary,
+  WbStoredAuth,
+  WbAuthInfo,
+  WbSwitchResult,
+  WbSession,
+  WbSessionJob,
+  TraeChatSession,
 } from '../types';
 
 // 浏览器直接访问 Vite 开发服务器（如 http://localhost:5173）时没有 Tauri 运行时，
@@ -126,8 +132,9 @@ export const api = {
     writeTextFile: (path: string, content: string) =>
       invoke('write_text_file', { path, content }),
   },
-  switchAccount: (userId: string) => invoke('switch_account', { userId }),
-  saveCurrentLogin: (userId: string) => invoke('save_current_login', { userId }),
+  switchAccount: (userId: string) => invoke('trae_switch_account', { userId }),
+  saveCurrentLogin: (userId: string) => invoke('trae_save_current_login', { userId }),
+  listSnapshots: () => invoke<string[]>('list_snapshots'),
   resetDeviceIds: () => invoke('reset_device_ids'),
   resetDeviceCode: () => invoke('reset_device_code'),
   profiles: {
@@ -147,8 +154,7 @@ export const api = {
     callbackStop: () => invoke('oauth_callback_stop'),
   },
   browserExtract: {
-    start: (groupId?: string) =>
-      invoke('browser_extract_start', { groupId }),
+    start: (groupId?: string) => invoke('browser_extract_start', { groupId }),
     stop: () => invoke('browser_extract_stop'),
   },
   apiServer: {
@@ -189,6 +195,35 @@ export const api = {
     refreshToken: (accountId: string) => invoke<WorkBuddyAccountMeta>('workbuddy_refresh_token', { accountId }),
     oauthStart: () => invoke<{ loginId: string; verificationUri: string; expiresIn: number }>('workbuddy_oauth_start'),
     oauthPoll: (loginId: string) => invoke<{ done: boolean; result?: WorkBuddyAccountMeta; error?: string }>('workbuddy_oauth_poll', { loginId }),
+    // ---- M1：客户端登录态切换 ----
+    authList: () => invoke<WbStoredAuth[]>('wb_auth_list'),
+    authCurrent: () => invoke<WbAuthInfo | null>('wb_auth_current'),
+    backupCurrentAuth: () => invoke<WbAuthInfo>('wb_auth_backup_current'),
+    switchClient: (uid: string, opts?: { reload?: boolean; migrate?: 'auto' | 'ask' | 'off' }) =>
+      invoke<WbSwitchResult>('wb_switch_account', { uid, opts }),
+    // ---- M2：会话迁移 ----
+    sessionList: (uid?: string) => invoke<WbSession[]>('wb_session_list', { uid }),
+    sessionCopy: (sourceUid: string, sessionId: string, targetUid: string) =>
+      invoke<{ sourceId: string; newId: string; status: string; failedFiles: number }>(
+        'wb_session_copy',
+        { sourceUid, sessionId, targetUid },
+      ),
+    sessionMigrateAll: (sourceUid: string, targetUid: string) =>
+      invoke<WbSessionJob>('wb_session_migrate_all', { sourceUid, targetUid }),
+    sessionJobStatus: () => invoke<WbSessionJob | null>('wb_session_job_status'),
+    lineageNormalize: () => invoke<number>('wb_session_lineage_normalize'),
+    // ---- M3：.wds 加密归档 ----
+    sessionExport: (sessionId: string, password: string) =>
+      invoke<string>('wb_session_export', { sessionId, password }),
+    sessionImport: (wdsPath: string, password: string) =>
+      invoke<string>('wb_session_import', { wdsPath, password }),
+  },
+  trae: {
+    // ---- M4：Trae 对话解密导出 ----
+    sessionList: () =>
+      invoke<{ plain_db_path: string; sessions: TraeChatSession[] }>('trae_session_list'),
+    exportMessages: (sessionId: string) =>
+      invoke<string>('trae_session_export_messages', { sessionId }),
   },
 };
 
@@ -248,6 +283,14 @@ export interface ProfileDoneEvent {
   action: 'backup' | 'restore';
 }
 
+export interface WbSwitchDoneEvent {
+  success: boolean;
+  uid: string;
+  nickname?: string;
+  sourceUid?: string;
+  reloaded: boolean;
+}
+
 export interface ListenerHandlers {
   onProxyLog?: (line: string) => void;
   onAccountCaptured?: (uid: string) => void;
@@ -262,6 +305,8 @@ export interface ListenerHandlers {
   onDeviceCodeResetDone?: (e: DeviceCodeResetDoneEvent) => void;
   onProfileProgress?: (line: string) => void;
   onProfileDone?: (e: ProfileDoneEvent) => void;
+  onWbSwitchDone?: (e: WbSwitchDoneEvent) => void;
+  onWbSessionJob?: (e: WbSessionJob & { error?: string }) => void;
 }
 
 export async function setupListeners(
@@ -354,6 +399,20 @@ export async function setupListeners(
     unsubs.push(
       await listen<ProfileDoneEvent>('profile-done', (e) =>
         handlers.onProfileDone!(e.payload),
+      ),
+    );
+  }
+  if (handlers.onWbSwitchDone) {
+    unsubs.push(
+      await listen<WbSwitchDoneEvent>('wb-switch-done', (e) =>
+        handlers.onWbSwitchDone!(e.payload),
+      ),
+    );
+  }
+  if (handlers.onWbSessionJob) {
+    unsubs.push(
+      await listen<WbSessionJob & { error?: string }>('wb-session-job', (e) =>
+        handlers.onWbSessionJob!(e.payload),
       ),
     );
   }

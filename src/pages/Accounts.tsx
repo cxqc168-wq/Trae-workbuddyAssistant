@@ -103,6 +103,8 @@ export default function Accounts() {
   const resetDevice = useAppStore((s) => s.resetDevice);
   const switchTo = useAppStore((s) => s.switchTo);
   const switchingTo = useAppStore((s) => s.switchingTo);
+  const switchProgress = useAppStore((s) => s.switchProgress);
+  const snapshotIds = useAppStore((s) => s.snapshotIds);
   const saveCurrentLogin = useAppStore((s) => s.saveCurrentLogin);
   const savingLogin = useAppStore((s) => s.savingLogin);
   const renewJwt = useAppStore((s) => s.renewJwt);
@@ -352,7 +354,7 @@ export default function Accounts() {
                           </button>
                         )}
                         <button
-                          title={switchingTo ? (switchingTo === a.user_id ? '切换中…' : '正在切换其他账号') : '切换到此账号'}
+                          title={switchingTo ? (switchingTo === a.user_id ? '切换中…' : '正在切换其他账号') : '切换到此账号（JWT 注入）'}
                           onClick={() => void switchTo(a.user_id)}
                           disabled={!!switchingTo || !!savingLogin}
                           className={`btn-ghost !p-2 ${switchingTo === a.user_id ? 'text-amber-500' : ''} ${(switchingTo && switchingTo !== a.user_id) || savingLogin ? 'opacity-40 cursor-not-allowed' : ''}`}
@@ -463,6 +465,59 @@ export default function Accounts() {
         groups={groups}
       />
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <Modal
+        open={switchingTo !== null}
+        onClose={() => {}}
+        title="正在切换 Trae 登录态"
+        footer={
+          <button
+            onClick={() => {}}
+            disabled
+            className="btn-primary opacity-60"
+          >
+            <Loader2 size={14} className="animate-spin" />
+            切换中…
+          </button>
+        }
+      >
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-zinc-300">
+            <Loader2 size={16} className="animate-spin text-amber-500" />
+            正在切换到账号 {switchingTo}，请稍候…
+          </div>
+          <div className="max-h-64 overflow-y-auto rounded-lg bg-slate-50 p-3 font-mono text-xs dark:bg-zinc-950">
+            {switchProgress.length === 0 ? (
+              <div className="text-slate-400">等待脚本输出…</div>
+            ) : (
+              switchProgress.map((line, i) => {
+                try {
+                  const obj = JSON.parse(line);
+                  const color =
+                    obj.status === 'error'
+                      ? 'text-rose-500'
+                      : obj.status === 'ok' || obj.stage === 'done'
+                        ? 'text-emerald-600'
+                        : 'text-slate-600 dark:text-zinc-300';
+                  return (
+                    <div key={i} className={color}>
+                      [{obj.stage}] {obj.message}
+                    </div>
+                  );
+                } catch {
+                  return (
+                    <div key={i} className="text-slate-500">
+                      {line}
+                    </div>
+                  );
+                }
+              })
+            )}
+          </div>
+          <div className="text-xs text-slate-400">
+            切换过程会关闭并重启 Trae，请勿关闭本窗口。
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -1417,13 +1472,13 @@ function BrowserExtractModal({
       <div className="space-y-4">
         {/* 步骤说明 */}
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-          1. 点击「启动提取浏览器」——应用会打开一个专用浏览器窗口（登录态会保留，下次免登录）；
+          1. 点击「启动提取浏览器」——应用会打开一个纯净的内置浏览器窗口；
           <br />
-          2. 在浏览器中登录 trae.cn，系统自动拦截登录凭证并保存为账号；
+          2. 请在弹出的浏览器页面中完成账号登录，系统将在您登录成功瞬间自动捕获 JWT 并保存为账号；
           <br />
-          3. 多账号：在浏览器中退出当前账号、登录下一个，即可连续提取；
+          3. 如需提取多个账号，在浏览器中退出登录并换号登录即可连续捕获；
           <br />
-          4. 全部完成后点击「完成并关闭」。适合 OAuth 授权页卡「认证中」时使用。
+          4. 捕获完成后点击「完成并关闭」。适合 OAuth 授权页卡「认证中」时使用。
         </div>
 
         {/* 分组（启动前选择，仅对新增账号生效） */}
@@ -1521,17 +1576,18 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
         <section className="rounded-lg border border-slate-200 p-3 dark:border-zinc-700">
           <h3 className="mb-1 flex items-center gap-1.5 font-semibold">
-            <LogIn size={15} className="text-amber-500" /> 切换账号流程
+            <LogIn size={15} className="text-amber-500" /> 切换账号流程（JWT 注入）
           </h3>
           <ol className="ml-4 list-decimal space-y-1 text-xs leading-relaxed text-slate-600 dark:text-zinc-300">
             <li>点击目标账号行的「切换」图标</li>
-            <li>系统自动保存当前登录态到当前账号槽位（如果已知当前账号 ID）</li>
-            <li>同时备份到 <code className="rounded bg-slate-100 px-1 dark:bg-zinc-800">last</code> 槽位作为安全回退</li>
-            <li>恢复目标账号的登录态（含设备标识）</li>
-            <li>重新启动 Trae Work，自动以目标账号登录</li>
+            <li>系统自动关闭 Trae 进程</li>
+            <li>生成新的设备标识（machineid / telemetry ID）</li>
+            <li>清除旧的浏览器登录数据（Cookies / IndexedDB 等）</li>
+            <li>将目标账号的 JWT 加密写入 storage.json（AES-128-CBC）</li>
+            <li>重新启动 Trae，自动以目标账号登录</li>
           </ol>
-          <p className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">
-            ⚠ 如果目标账号从未保存过登录态，切换会被中止并提示「无快照」。请先用「保存」图标创建快照。
+          <p className="mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            ✓ JWT 注入方式无需预先保存快照，只要账号有有效的 JWT 即可切换
           </p>
         </section>
 

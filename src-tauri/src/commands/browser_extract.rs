@@ -1,14 +1,107 @@
-//! 浏览器一键提取 JWT 登录：通过 CDP 驱动系统 Edge/Chrome，
+//! 浏览器一键提取 JWT 登录：通过 CDP 驱动内置 Playwright 浏览器，
 //! 拦截 trae API 请求的 Authorization 头完成账号保存。
-//! 设计文档：docs/superpowers/specs/2026-09-03-browser-extract-jwt-design.md
+//! 设计文档：docs/superpowers/specs/2026-09-30-playwright-browser-extract-design.md
 
-/// 常用浏览器可执行文件候选路径（Edge 优先于 Chrome，内核一致且更普及）
-const BROWSER_CANDIDATES: &[&str] = &[
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-];
+use std::path::{Path, PathBuf};
+
+/// 扫描目录下的 chrome.exe 可执行文件
+fn find_chrome_in_dir(dir: &Path) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        return None;
+    }
+    for candidate in [
+        dir.join("chrome.exe"),
+        dir.join("chrome-win64").join("chrome.exe"),
+        dir.join("chrome-win").join("chrome.exe"),
+    ] {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// 扫描本地 %LOCALAPPDATA%\ms-playwright 目录下的 Chromium 浏览器（开发环境自动兜底）
+pub fn scan_ms_playwright_dir() -> Option<PathBuf> {
+    let local_appdata = std::env::var("LOCALAPPDATA").ok()?;
+    let playwright_dir = PathBuf::from(local_appdata).join("ms-playwright");
+    if !playwright_dir.is_dir() {
+        return None;
+    }
+
+    let mut entries = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(&playwright_dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("chromium-") {
+                        entries.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    // 按名称倒序排序（例如 chromium-1243 在 chromium-1140 之前）
+    entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+    for dir in entries {
+        if let Some(chrome) = find_chrome_in_dir(&dir) {
+            return Some(chrome);
+        }
+    }
+    None
+}
+
+/// 内置浏览器发现：
+/// 1. 设置中配置了自定义路径（browser_path）→ 优先使用它（配错直接报错）
+/// 2. 应用 resource 目录: <resource_dir>/browser/
+/// 3. exe 同级 resources/browser/ 目录
+/// 4. 当前工作目录 resources/browser/ 目录
+/// 5. 开发期本地 Playwright 目录兜底
+pub fn find_builtin_browser(
+    app: &tauri::AppHandle,
+    custom_path: Option<&str>,
+) -> Option<PathBuf> {
+    // 1. 设置了自定义路径：只用它
+    if let Some(c) = custom_path {
+        if !c.trim().is_empty() {
+            let p = PathBuf::from(c.trim());
+            if p.is_file() {
+                return Some(p);
+            }
+            return None;
+        }
+    }
+
+    // 2. Tauri 资源目录 (生产环境打包资源)
+    if let Ok(res_dir) = app.path().resource_dir() {
+        let browser_dir = res_dir.join("browser");
+        if let Some(p) = find_chrome_in_dir(&browser_dir) {
+            return Some(p);
+        }
+    }
+
+    // 3. exe 同级 resources/browser (便携版解压布局)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let browser_dir = exe_dir.join("resources").join("browser");
+            if let Some(p) = find_chrome_in_dir(&browser_dir) {
+                return Some(p);
+            }
+        }
+    }
+
+    // 4. 当前工作目录 resources/browser
+    let cwd_browser = PathBuf::from("resources").join("browser");
+    if let Some(p) = find_chrome_in_dir(&cwd_browser) {
+        return Some(p);
+    }
+
+    // 5. 本地 Playwright 目录兜底
+    scan_ms_playwright_dir()
+}
 
 /// 调试端口扫描范围（避开常用 9222，减少与用户自己开的调试端口冲突）
 const DEBUG_PORT_RANGE: std::ops::RangeInclusive<u16> = 9333..=9433;
@@ -25,9 +118,10 @@ pub(crate) fn normalize_token(raw: &str) -> String {
     format!("Cloud-IDE-JWT {}", token)
 }
 
-/// 是否为 trae API 请求（JWT 出现在这些请求的 Authorization 头中）
+/// 是否为 trae API 请求（JWT 出现在这些请求的 Authorization 头中）。
+/// 同时匹配国内站 api.trae.cn 和国际站 api.trae.com.cn。
 pub(crate) fn is_trae_api_url(url: &str) -> bool {
-    url.contains("api.trae.com.cn")
+    url.contains("api.trae.cn") || url.contains("api.trae.com.cn")
 }
 
 /// 从 CDP 请求头 JSON 中提取 Authorization 值（头名大小写不敏感）。
@@ -47,28 +141,6 @@ pub(crate) fn auth_header(headers: &serde_json::Value) -> Option<String> {
     None
 }
 
-/// 从候选路径中选出第一个存在的文件
-pub(crate) fn pick_existing(paths: &[std::path::PathBuf]) -> Option<std::path::PathBuf> {
-    paths.iter().find(|p| p.is_file()).cloned()
-}
-
-/// 浏览器发现：配置了 browser_path 就只用它（配错直接报错，不静默回退）；
-/// 未配置则按内置候选顺序探测 Edge → Chrome
-pub(crate) fn find_browser(custom: Option<&str>) -> Option<std::path::PathBuf> {
-    match custom {
-        Some(c) if !c.trim().is_empty() => {
-            let p = std::path::PathBuf::from(c.trim());
-            if p.is_file() { Some(p) } else { None }
-        }
-        _ => pick_existing(
-            &BROWSER_CANDIDATES
-                .iter()
-                .map(std::path::PathBuf::from)
-                .collect::<Vec<_>>(),
-        ),
-    }
-}
-
 /// 在调试端口范围内找一个当前空闲的端口（存在极小竞争窗口，CDP 连接失败会走报错路径）
 fn find_free_port() -> Option<u16> {
     for port in DEBUG_PORT_RANGE {
@@ -77,6 +149,20 @@ fn find_free_port() -> Option<u16> {
         }
     }
     None
+}
+
+/// 异步安全清理临时 Profile 目录（带延迟重试，防 Windows 文件锁占用）
+pub async fn clean_temp_profile(dir: &Path) {
+    if !dir.exists() {
+        return;
+    }
+    for i in 0..5 {
+        if tokio::fs::remove_dir_all(dir).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300 * (i + 1))).await;
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 // ==================== 核心实现：启动/监听/停止 ====================
@@ -96,22 +182,25 @@ use crate::jwt;
 use crate::models::{AccountsFile, GroupsFile, RawAccount};
 use crate::state::AppState;
 
-/// 提取会话句柄：浏览器子进程 + CDP 任务集合
+/// 提取会话句柄：浏览器子进程 + CDP 任务集合 + 临时 Profile 路径
 pub struct BrowserExtractHandle {
     pub child: Child,
     pub browser: Browser,
     pub tasks: Vec<tokio::task::JoinHandle<()>>,
+    pub profile_dir: PathBuf,
 }
 
 impl BrowserExtractHandle {
-    /// 同步强杀（应用退出等无 await 环境使用）。
-    /// tokio 1.53 的 `Child::kill` 是 async（kill + wait），
-    /// 同步上下文只能用 `start_kill` 发出终止信号。
+    /// 同步强杀并清理临时目录（应用退出等无 await 环境使用）。
     pub fn kill_now(&mut self) {
         let _ = self.child.start_kill();
         for t in self.tasks.drain(..) {
             t.abort();
         }
+        let profile = self.profile_dir.clone();
+        tokio::spawn(async move {
+            clean_temp_profile(&profile).await;
+        });
     }
 }
 
@@ -121,6 +210,7 @@ fn progress(kind: &str, message: &str) -> serde_json::Value {
 }
 
 /// 启动提取浏览器并开始监听 JWT（幂等：浏览器已存活则直接成功）
+/// 每次启动创建全新独立临时 Profile，强制用户在纯净窗口登录以捕获 JWT。
 #[tauri::command]
 pub async fn browser_extract_start(
     app: tauri::AppHandle,
@@ -147,65 +237,81 @@ pub async fn browser_extract_start(
         }
     }
 
-    // 1. 浏览器发现
+    // 1. 内置浏览器发现
     let settings = state.settings();
-    let browser_path = match find_browser(settings.browser_path.as_deref()) {
+    let browser_path = match find_builtin_browser(&app, settings.browser_path.as_deref()) {
         Some(p) => p,
         None => {
             return Err(match settings.browser_path.as_deref() {
                 Some(c) if !c.trim().is_empty() => {
                     format!("设置中的浏览器路径无效：{c}，请到「设置」页修正后重试")
                 }
-                _ => "未找到 Edge/Chrome 浏览器，请到「设置」页填写「提取浏览器路径」".to_string(),
+                _ => "未找到软件内置浏览器组件，请确认安装包完整或已安装 Playwright Chromium".to_string(),
             });
         }
     };
 
-    // 2. 选调试端口，启动浏览器（持久 profile：登录态跨会话保留）
+    // 2. 选调试端口，创建全新临时 profile，启动浏览器
     let port = find_free_port().ok_or("9333-9433 范围内无可用调试端口")?;
-    let profile_dir = state.data_path("browser_profile");
+    let temp_profile = std::env::temp_dir().join(format!("trae_extract_{}", uuid::Uuid::new_v4()));
+    if let Err(e) = std::fs::create_dir_all(&temp_profile) {
+        return Err(format!("创建临时浏览器配置目录失败：{e}"));
+    }
+
+    fs_utils::app_log(
+        &state.data_dir,
+        &format!(
+            "浏览器提取：使用内置浏览器 {} 启动 (临时Profile: {})",
+            browser_path.display(),
+            temp_profile.display()
+        ),
+    );
+
     let mut cmd = Command::new(&browser_path);
     cmd.arg(format!("--remote-debugging-port={port}"))
-        .arg(format!("--user-data-dir={}", profile_dir.display()))
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
+        .arg(format!("--user-data-dir={}", temp_profile.display()))
         .arg("https://www.trae.cn/");
     #[cfg(windows)]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW，防控制台闪烁
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("启动浏览器失败（{}）：{e}", browser_path.display()))?;
+        .map_err(|e| {
+            let _ = std::fs::remove_dir_all(&temp_profile);
+            format!("启动浏览器失败（{}）：{e}", browser_path.display())
+        })?;
 
     // 3. 等待 CDP HTTP 端点就绪并取 ws 地址
     let ws_url = match wait_debug_endpoint(port).await {
         Ok(u) => u,
         Err(e) => {
             let _ = child.kill().await;
+            clean_temp_profile(&temp_profile).await;
             return Err(e);
         }
     };
 
-    // 4. 连接 CDP（spawn 后所有失败路径统一走 cleanup_spawned：
-    //    杀子进程 + abort 已启动任务。tokio 默认 kill_on_drop=false，
-    //    仅 drop Child 不会终止进程；且持久 profile 下孤儿实例会抢占
-    //    --user-data-dir，导致后续 start 永远等不到调试端口而超时）
+    // 4. 连接 CDP
     let mut tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     let (browser, mut handler) = match Browser::connect(ws_url).await {
         Ok(v) => v,
         Err(e) => {
-            cleanup_spawned(&mut child, &mut tasks).await;
+            cleanup_spawned(&mut child, &mut tasks, &temp_profile).await;
             return Err(format!("连接浏览器调试协议失败：{e}"));
         }
     };
 
-    // handler 驱动任务：流结束 = 浏览器退出 → 通知前端
+    // handler 驱动任务：流结束 = 浏览器退出 → 清理临时 Profile 并通知前端
     let app_exit = app.clone();
+    let exit_profile = temp_profile.clone();
     tasks.push(tokio::spawn(async move {
         while let Some(h) = handler.next().await {
             if h.is_err() {
                 break;
             }
         }
+        clean_temp_profile(&exit_profile).await;
         let _ = app_exit.emit(
             "browser-extract-progress",
             progress("exited", "浏览器已关闭，可重新启动提取"),
@@ -217,7 +323,7 @@ pub async fn browser_extract_start(
     let mut pages = match browser.pages().await {
         Ok(p) => p,
         Err(e) => {
-            cleanup_spawned(&mut child, &mut tasks).await;
+            cleanup_spawned(&mut child, &mut tasks, &temp_profile).await;
             return Err(format!("获取页面失败：{e}"));
         }
     };
@@ -225,7 +331,7 @@ pub async fn browser_extract_start(
         let page = match browser.new_page("https://www.trae.cn/").await {
             Ok(p) => p,
             Err(e) => {
-                cleanup_spawned(&mut child, &mut tasks).await;
+                cleanup_spawned(&mut child, &mut tasks, &temp_profile).await;
                 return Err(format!("打开 trae.cn 失败：{e}"));
             }
         };
@@ -233,6 +339,8 @@ pub async fn browser_extract_start(
     }
 
     let captured: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    // 收集已启用 Network 监听的页面，用于后续主动 reload
+    let mut monitored_pages: Vec<chromiumoxide::Page> = Vec::new();
     for page in pages {
         if page.execute(EnableParams::default()).await.is_err() {
             continue; // 单页启用失败不影响其它页
@@ -240,6 +348,7 @@ pub async fn browser_extract_start(
         let Ok(mut events) = page.event_listener::<EventRequestWillBeSent>().await else {
             continue;
         };
+        monitored_pages.push(page.clone());
         let app_c = app.clone();
         let captured_c = captured.clone();
         let group_c = group_id.clone();
@@ -305,11 +414,29 @@ pub async fn browser_extract_start(
         }));
     }
 
+    // 5.5 主动重新加载第一个页面：浏览器启动时页面可能已在 Network 监听启用前加载完成，
+    // 导致已登录用户的 API 请求（含 Authorization 头）未被捕获。主动 reload 确保
+    // 所有请求在监听就绪后重新发出，从而能正常提取 JWT。
+    if let Some(first_page) = monitored_pages.first() {
+        let _ = app.emit(
+            "browser-extract-progress",
+            progress("started", "正在重新加载页面以捕获登录凭证…"),
+        );
+        // 导航到 trae.cn 首页（等价于 reload，但更可靠）
+        if let Err(e) = first_page.goto("https://www.trae.cn/").await {
+            fs_utils::app_log(
+                &state.data_dir,
+                &format!("浏览器提取：主动 reload 失败（不影响监听）: {e}"),
+            );
+        }
+    }
+
     // 6. 记录句柄并通知前端
     *runtime.lock().unwrap_or_else(|e| e.into_inner()) = Some(BrowserExtractHandle {
         child,
         browser,
         tasks,
+        profile_dir: temp_profile,
     });
     fs_utils::app_log(
         &state.data_dir,
@@ -332,14 +459,17 @@ pub async fn browser_extract_start(
     Ok(())
 }
 
-/// spawn 后中途失败的统一清理：杀浏览器子进程 + abort 已启动任务。
-/// 必须显式 kill——tokio 默认 kill_on_drop=false，drop Child 不会终止进程，
-/// 孤儿浏览器会一直占用持久 profile，导致后续 start 全部超时失败。
-async fn cleanup_spawned(child: &mut Child, tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
+/// spawn 后中途失败的统一清理：杀浏览器子进程 + abort 已启动任务 + 清理临时 Profile。
+async fn cleanup_spawned(
+    child: &mut Child,
+    tasks: &mut Vec<tokio::task::JoinHandle<()>>,
+    profile_dir: &Path,
+) {
     let _ = child.kill().await;
     for t in tasks.drain(..) {
         t.abort();
     }
+    clean_temp_profile(profile_dir).await;
 }
 
 /// 轮询 CDP HTTP 端点直到浏览器就绪（15s 超时），返回 webSocketDebuggerUrl
@@ -420,8 +550,8 @@ fn save_captured_account(
     Ok((name, true))
 }
 
-/// 停止提取并关闭浏览器（幂等）：优先 CDP 优雅关闭（保留 profile 且下次不弹恢复提示），
-/// 3s 未退出则强杀兜底
+/// 停止提取并关闭浏览器（幂等）：优先 CDP 优雅关闭，
+/// 3s 未退出则强杀兜底，最后清理临时 Profile 目录
 #[tauri::command]
 pub async fn browser_extract_stop(
     runtime: State<'_, Mutex<Option<BrowserExtractHandle>>>,
@@ -434,8 +564,10 @@ pub async fn browser_extract_stop(
     else {
         return Ok(()); // 未运行：幂等
     };
+    let profile_dir = h.profile_dir.clone();
     if h.browser.close().await.is_err() {
         h.kill_now();
+        clean_temp_profile(&profile_dir).await;
         return Ok(());
     }
     if tokio::time::timeout(std::time::Duration::from_secs(3), h.child.wait())
@@ -447,6 +579,7 @@ pub async fn browser_extract_stop(
     for t in h.tasks.drain(..) {
         t.abort();
     }
+    clean_temp_profile(&profile_dir).await;
     Ok(())
 }
 
@@ -454,6 +587,15 @@ pub async fn browser_extract_stop(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_scan_ms_playwright_dir() {
+        let found = scan_ms_playwright_dir();
+        if let Some(path) = found {
+            assert!(path.is_file());
+            assert!(path.to_string_lossy().to_lowercase().contains("chrome.exe"));
+        }
+    }
 
     #[test]
     fn normalize_token_bearer() {
@@ -482,6 +624,14 @@ mod tests {
     fn tra_api_url_matches() {
         assert!(is_trae_api_url(
             "https://api.trae.com.cn/cloudide/api/v3/trae/GetUserInfo"
+        ));
+    }
+
+    #[test]
+    fn tra_api_cn_domain_matches() {
+        // 国内站实际 API 域名为 api.trae.cn（非 .com.cn），必须能匹配
+        assert!(is_trae_api_url(
+            "https://api.trae.cn/trae/api/v2/pay/cn_credits_billing_status"
         ));
     }
 
@@ -526,36 +676,20 @@ mod tests {
     }
 
     #[test]
-    fn pick_existing_finds_first() {
-        let tmp = std::env::temp_dir();
-        let a = tmp.join("be_test_missing_a.exe");
-        let b = tmp.join(format!("be_test_exists_{}.exe", std::process::id()));
-        let _ = std::fs::remove_file(&b);
-        std::fs::write(&b, b"x").unwrap();
-        assert_eq!(pick_existing(&[a, b.clone()]), Some(b.clone()));
-        let _ = std::fs::remove_file(&b);
+    fn find_chrome_in_dir_finds_exe() {
+        let tmp = std::env::temp_dir().join(format!("be_test_dir_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        let chrome = tmp.join("chrome.exe");
+        std::fs::write(&chrome, b"x").unwrap();
+        assert_eq!(find_chrome_in_dir(&tmp), Some(chrome));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
-    fn pick_existing_none_when_missing() {
-        let tmp = std::env::temp_dir();
-        let a = tmp.join("be_test_missing_b1.exe");
-        let b = tmp.join("be_test_missing_b2.exe");
-        assert_eq!(pick_existing(&[a, b]), None);
-    }
-
-    #[test]
-    fn find_browser_custom_valid() {
-        let tmp = std::env::temp_dir();
-        let p = tmp.join(format!("be_test_browser_{}.exe", std::process::id()));
-        let _ = std::fs::remove_file(&p);
-        std::fs::write(&p, b"x").unwrap();
-        assert_eq!(find_browser(Some(p.to_str().unwrap())), Some(p.clone()));
-        let _ = std::fs::remove_file(&p);
-    }
-
-    #[test]
-    fn find_browser_custom_invalid_returns_none() {
-        assert_eq!(find_browser(Some(r"C:\nonexistent\browser.exe")), None);
+    fn find_chrome_in_dir_missing_returns_none() {
+        let tmp = std::env::temp_dir().join(format!("be_test_empty_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        assert_eq!(find_chrome_in_dir(&tmp), None);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

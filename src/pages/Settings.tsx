@@ -371,11 +371,11 @@ export default function Settings() {
                 type="text"
                 value={form.browser_path ?? ''}
                 onChange={(e) => update('browser_path', e.target.value.trim() || null)}
-                placeholder="留空则自动检测（Edge 优先，其次 Chrome）"
+                placeholder="留空则使用内置 Playwright 浏览器"
                 className="input"
               />
               <p className="mt-1 text-xs text-slate-400">
-                「浏览器提取 JWT」功能使用的浏览器 exe 路径；留空将按 Edge → Chrome 顺序自动探测。
+                「浏览器提取 JWT」功能使用的浏览器 exe 路径；留空将使用内置 Playwright Chromium 浏览器。
               </p>
             </div>
             <label className="flex items-center gap-2">

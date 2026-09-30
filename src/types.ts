@@ -294,3 +294,80 @@ export interface WorkBuddyCreditSummary {
   resources?: WorkBuddyCreditResource[];
   updatedAt?: number;
 }
+
+// ---- WorkBuddy 客户端登录态切换 / 会话迁移（M1-M3） ----
+
+/** 已备份的 WorkBuddy 客户端登录文件元信息（不含 token） */
+export interface WbStoredAuth {
+  uid: string;
+  nickname: string | null;
+  email: string | null;
+  file_name: string;
+  size_bytes: number;
+  last_modified: string;
+}
+
+/** WorkBuddy 登录文件中的账号身份信息 */
+export interface WbAuthInfo {
+  uid: string;
+  nickname?: string;
+  email?: string;
+  uin?: string;
+}
+
+/** 客户端切换结果 */
+export interface WbSwitchResult {
+  uid: string;
+  nickname?: string;
+  reloaded: boolean;
+  hint: string;
+}
+
+/** wb-switch-done 事件载荷 */
+export interface WbSwitchDoneEvent {
+  success: boolean;
+  uid: string;
+  nickname?: string;
+  sourceUid?: string;
+  reloaded: boolean;
+}
+
+/** 会话迁移任务进度（M2） */
+export interface WbSessionJob {
+  id: string;
+  source_uid: string;
+  target_uid: string;
+  status: 'queued' | 'running' | 'done' | 'partial' | 'failed';
+  total: number;
+  processed: number;
+  copied: number;
+  skipped: number;
+  partial: number;
+  failed: number;
+}
+
+/** WorkBuddy 会话记录（M2） */
+export interface WbSession {
+  id: string;
+  user_id: string;
+  title: string;
+  custom_title: string | null;
+  cwd: string;
+  status: string;
+  created_at: number;
+  updated_at: number;
+  last_activity_at: number;
+  mode: string | null;
+  model: string | null;
+  file_count?: number;
+  size_bytes?: number;
+}
+
+/** Trae 对话会话（M4） */
+export interface TraeChatSession {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+}
