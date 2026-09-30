@@ -209,6 +209,92 @@ fn progress(kind: &str, message: &str) -> serde_json::Value {
     json!({ "type": kind, "message": message })
 }
 
+/// 为指定页面挂载 Network 监听，拦截 trae API 请求的 Authorization 头
+fn attach_page_network_listener(
+    page: chromiumoxide::Page,
+    app: tauri::AppHandle,
+    captured: Arc<Mutex<HashSet<String>>>,
+    group_id: Option<String>,
+    tasks: &mut Vec<tokio::task::JoinHandle<()>>,
+) {
+    tasks.push(tokio::spawn(async move {
+        if page.execute(EnableParams::default()).await.is_err() {
+            return;
+        }
+        let Ok(mut events) = page.event_listener::<EventRequestWillBeSent>().await else {
+            return;
+        };
+        let _keep_alive = page;
+        while let Some(ev) = events.next().await {
+            if !is_trae_api_url(&ev.request.url) {
+                continue;
+            }
+            let Some(auth) = auth_header(ev.request.headers.inner()) else {
+                continue;
+            };
+            let jwt = normalize_token(&auth);
+            let info = jwt::parse(&jwt);
+            let Some(user_id) = info.user_id else {
+                continue;
+            };
+            {
+                let mut set = captured.lock().unwrap_or_else(|e| e.into_inner());
+                if set.contains(&user_id) {
+                    continue;
+                }
+                set.insert(user_id.clone());
+            }
+
+            let app_c = app.clone();
+            let jwt_c = jwt.clone();
+            let uid_c = user_id.clone();
+            let gid_c = group_id.clone();
+            let res = tokio::task::spawn_blocking(move || {
+                save_captured_account(&app_c, &jwt_c, &uid_c, &gid_c)
+            })
+            .await;
+
+            let res = match res {
+                Ok(r) => r,
+                Err(e) => Err(format!("后台任务异常：{e}")),
+            };
+
+            match res {
+                Ok((name, is_new)) => {
+                    let _ = app.emit(
+                        "browser-extract-captured",
+                        json!({
+                            "user_id": user_id,
+                            "name": name,
+                            "exp_hours": info.exp_hours,
+                            "is_new": is_new,
+                        }),
+                    );
+                    let _ = app.emit(
+                        "browser-extract-progress",
+                        progress("started", &format!("已成功抓取账号 [{name}] JWT，正在自动关闭浏览器…")),
+                    );
+                    // 满足需求：用户完成登录并成功抓取到 JWT 后自动关闭浏览器
+                    let app_stop = app.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                        let rt = app_stop.state::<Mutex<Option<BrowserExtractHandle>>>();
+                        let _ = browser_extract_stop(rt).await;
+                    });
+                }
+                Err(e) => {
+                    let _ = app.emit(
+                        "browser-extract-progress",
+                        progress("error", &format!("保存账号 [{user_id}] 失败：{e}")),
+                    );
+                    let mut set = captured.lock().unwrap_or_else(|e| e.into_inner());
+                    set.remove(&user_id);
+                }
+            }
+        }
+    }));
+}
+
 /// 启动提取浏览器并开始监听 JWT（幂等：浏览器已存活则直接成功）
 /// 每次启动创建全新独立临时 Profile，强制用户在纯净窗口登录以捕获 JWT。
 #[tauri::command]
@@ -302,15 +388,18 @@ pub async fn browser_extract_start(
         }
     };
 
-    // handler 驱动任务：流结束 = 浏览器退出 → 清理临时 Profile 并通知前端
+    // handler 驱动任务：持续运行驱动 CDP 消息循环，绝不因单条消息解析异常而退出
+    // 只有当 handler.next().await 返回 None 时才代表浏览器完全关闭断开连接
     let app_exit = app.clone();
     let exit_profile = temp_profile.clone();
     tasks.push(tokio::spawn(async move {
-        while let Some(h) = handler.next().await {
-            if h.is_err() {
-                break;
+        while let Some(res) = handler.next().await {
+            if let Err(e) = res {
+                // 仅忽略非致命的 CDP 消息解析警告，绝不中断循环
+                let _ = e;
             }
         }
+        // 浏览器实际退出后清理临时 Profile 目录
         clean_temp_profile(&exit_profile).await;
         let _ = app_exit.emit(
             "browser-extract-progress",
@@ -339,96 +428,15 @@ pub async fn browser_extract_start(
     }
 
     let captured: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    // 收集已启用 Network 监听的页面，用于后续主动 reload
-    let mut monitored_pages: Vec<chromiumoxide::Page> = Vec::new();
-    for page in pages {
-        if page.execute(EnableParams::default()).await.is_err() {
-            continue; // 单页启用失败不影响其它页
-        }
-        let Ok(mut events) = page.event_listener::<EventRequestWillBeSent>().await else {
-            continue;
-        };
-        monitored_pages.push(page.clone());
-        let app_c = app.clone();
-        let captured_c = captured.clone();
-        let group_c = group_id.clone();
-        tasks.push(tokio::spawn(async move {
-            let _keep_alive = page; // 持有页面句柄，防止事件源被释放
-            while let Some(ev) = events.next().await {
-                if !is_trae_api_url(&ev.request.url) {
-                    continue;
-                }
-                let Some(auth) = auth_header(ev.request.headers.inner()) else {
-                    continue;
-                };
-                let jwt = normalize_token(&auth);
-                let info = jwt::parse(&jwt);
-                let Some(user_id) = info.user_id else {
-                    continue; // 无效 token（解析不出 user_id），静默忽略
-                };
-                // 会话内去重：每个 user_id 只保存一次
-                {
-                    let mut set = captured_c.lock().unwrap_or_else(|e| e.into_inner());
-                    if set.contains(&user_id) {
-                        continue;
-                    }
-                    set.insert(user_id.clone());
-                }
-                // 保存走 spawn_blocking：内部含同步网络请求（GetUserInfo 最多 120s）
-                let res = tokio::task::spawn_blocking({
-                    let app = app_c.clone();
-                    let jwt = jwt.clone();
-                    let user_id = user_id.clone();
-                    let group = group_c.clone();
-                    move || save_captured_account(&app, &jwt, &user_id, &group)
-                })
-                .await;
-                // JoinError 与保存失败统一为 String，便于同一分支处理
-                let res = match res {
-                    Ok(r) => r,
-                    Err(e) => Err(format!("后台任务异常：{e}")),
-                };
-                match res {
-                    Ok((name, is_new)) => {
-                        let _ = app_c.emit(
-                            "browser-extract-captured",
-                            json!({
-                                "user_id": user_id,
-                                "name": name,
-                                "exp_hours": info.exp_hours,
-                                "is_new": is_new,
-                            }),
-                        );
-                    }
-                    Err(e) => {
-                        let _ = app_c.emit(
-                            "browser-extract-progress",
-                            progress("error", &format!("保存账号 [{user_id}] 失败：{e}")),
-                        );
-                        // 回退去重标记，允许下一次请求重试
-                        let mut set = captured_c.lock().unwrap_or_else(|e| e.into_inner());
-                        set.remove(&user_id);
-                    }
-                }
-            }
-        }));
-    }
 
-    // 5.5 主动重新加载第一个页面：浏览器启动时页面可能已在 Network 监听启用前加载完成，
-    // 导致已登录用户的 API 请求（含 Authorization 头）未被捕获。主动 reload 确保
-    // 所有请求在监听就绪后重新发出，从而能正常提取 JWT。
-    if let Some(first_page) = monitored_pages.first() {
-        let _ = app.emit(
-            "browser-extract-progress",
-            progress("started", "正在重新加载页面以捕获登录凭证…"),
+    for page in pages {
+        attach_page_network_listener(
+            page,
+            app.clone(),
+            captured.clone(),
+            group_id.clone(),
+            &mut tasks,
         );
-        // 导航到 trae.cn 首页（等价于 reload，但更可靠）
-        if let Err(e) = first_page.goto("https://www.trae.cn/").await {
-            fs_utils::app_log(
-                &state.data_dir,
-                &format!("浏览器提取：主动 reload 失败（不影响监听）: {e}"),
-            );
-        }
     }
 
     // 6. 记录句柄并通知前端
