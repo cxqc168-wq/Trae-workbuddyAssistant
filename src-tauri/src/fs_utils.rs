@@ -6,9 +6,27 @@ use std::path::Path;
 /// 读取 JSON，文件不存在或解析失败返回默认值。
 pub fn read_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
     match fs::read_to_string(path) {
-        Ok(s) if !s.trim().is_empty() => serde_json::from_str(&s).unwrap_or_default(),
+        Ok(s) if !s.trim().is_empty() => match serde_json::from_str(&s) {
+            Ok(val) => val,
+            Err(e) => {
+                eprintln!("[fs_utils::read_json] 解析 {:?} 失败: {e}", path);
+                T::default()
+            }
+        },
         _ => T::default(),
     }
+}
+
+/// 严格读取 JSON：文件不存在返回 Ok(default)；文件存在且非空时若解析失败返回 Err，绝不静默吞掉解析错误导致误删盘上数据。
+pub fn read_json_strict<T: serde::de::DeserializeOwned + Default>(path: &Path) -> Result<T, String> {
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    let s = fs::read_to_string(path).map_err(|e| format!("读取文件失败 {:?}: {e}", path))?;
+    if s.trim().is_empty() {
+        return Ok(T::default());
+    }
+    serde_json::from_str(&s).map_err(|e| format!("解析 JSON 文件失败 {:?}: {e}", path))
 }
 
 /// 原子写：先写临时文件再 rename，避免断电损坏。
@@ -95,5 +113,38 @@ pub fn app_log(data_dir: &Path, msg: &str) {
         .open(&log_path)
     {
         let _ = writeln!(f, "[{}] {}", now_ts(), msg);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_json_strict() {
+        let dir = std::env::temp_dir().join(format!("test_json_strict_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test.json");
+
+        // 1. 文件不存在返回 Ok(default)
+        let _ = std::fs::remove_file(&path);
+        let val: serde_json::Value = read_json_strict(&path).unwrap();
+        assert_eq!(val, serde_json::Value::Null);
+
+        // 2. 文件为空返回 Ok(default)
+        std::fs::write(&path, "").unwrap();
+        let val: serde_json::Value = read_json_strict(&path).unwrap();
+        assert_eq!(val, serde_json::Value::Null);
+
+        // 3. 文件有损坏数据返回 Err（绝不静默回退 default 导致数据覆盖）
+        std::fs::write(&path, "{ invalid json").unwrap();
+        assert!(read_json_strict::<serde_json::Value>(&path).is_err());
+
+        // 4. 正确数据正常解析
+        std::fs::write(&path, r#"{"hello":"world"}"#).unwrap();
+        let val: serde_json::Value = read_json_strict(&path).unwrap();
+        assert_eq!(val["hello"], "world");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

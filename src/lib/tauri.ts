@@ -60,10 +60,10 @@ export const api = {
     list: () => invoke<AccountView[]>('accounts_list'),
     addManual: (name: string, jwt: string, groupId?: string) =>
       invoke('account_add_manual', { name, jwt, groupId }),
-    delete: (userId: string, deleteProfile: boolean) =>
-      invoke('account_delete', { userId, deleteProfile }),
-    update: (userId: string, name?: string, jwt?: string) =>
-      invoke('account_update', { userId, name, jwt }),
+    delete: (userId: string, deleteProfile: boolean, accountId?: string) =>
+      invoke('account_delete', { userId, deleteProfile, accountId }),
+    update: (userId: string, name?: string, jwt?: string, accountId?: string) =>
+      invoke('account_update', { userId, name, jwt, accountId }),
     fetchRemainingCredits: (userId: string) =>
       invoke<number>('fetch_remaining_credits', { userId }),
     refreshRemainingCredits: () =>

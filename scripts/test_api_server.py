@@ -325,7 +325,7 @@ def main():
     parser = argparse.ArgumentParser(description="Trae Work Assistant API 端到端测试")
     parser.add_argument("--host", default="127.0.0.1", help="API 服务地址")
     parser.add_argument("--port", type=int, default=7864, help="API 服务端口")
-    parser.add_argument("--key", default="sk-72a12ee8-b462-4b03-837f-de0646fb419f-64aad",
+    parser.add_argument("--key", default="",
                         help="API Key")
     parser.add_argument("--model", default="glm-5.2", help="测试模型")
     args = parser.parse_args()

@@ -127,7 +127,7 @@ pub fn proxy_start(
         }
     };
 
-    let mut cmd = Command::new(&state.python_exe);
+    let mut cmd = crate::python::command(&state);
     cmd.arg(&script_path)
         .creation_flags(0x08000000)
         .env("TRAEDATA_DIR", &data_dir)

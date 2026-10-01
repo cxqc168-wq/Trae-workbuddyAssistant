@@ -119,15 +119,31 @@ pub fn account_add_manual(
 ) -> Result<(), String> {
     let info = jwt::parse(&jwt);
     let uid = info.user_id.ok_or("无法从 JWT 解析 UserID，请检查格式")?;
-    let mut accounts: AccountsFile = fs_utils::read_json(&state.path("checkin_accounts.json"));
-    if accounts
+    let accounts_path = state.path("checkin_accounts.json");
+    let mut accounts: AccountsFile = fs_utils::read_json_strict(&accounts_path)
+        .unwrap_or_default();
+    if let Some(existing) = accounts
         .accounts
-        .iter()
-        .any(|a| a.user_id.as_deref() == Some(&uid))
+        .iter_mut()
+        .find(|a| {
+            a.user_id.as_deref() == Some(&uid)
+                || jwt::parse(&a.jwt).user_id.as_deref() == Some(&uid)
+        })
     {
-        return Err("该账号已存在".into());
+        existing.name = name;
+        existing.jwt = jwt;
+        existing.user_id = Some(uid.clone());
+        existing.updated_at = Some(fs_utils::now_iso());
+        fs_utils::write_json(&accounts_path, &accounts)?;
+        if let Some(g) = group_id {
+            let mut groups: GroupsFile = fs_utils::read_json(&state.path("groups.json"));
+            groups.membership.insert(uid, g);
+            let _ = fs_utils::write_json(&state.path("groups.json"), &groups);
+        }
+        return Ok(());
     }
     accounts.accounts.push(RawAccount {
+        id: Some(format!("acc-{}", uuid::Uuid::new_v4().simple())),
         name: name.clone(),
         user_id: Some(uid.clone()),
         jwt,
@@ -135,7 +151,7 @@ pub fn account_add_manual(
         added_at: Some(fs_utils::now_iso()),
         updated_at: Some(fs_utils::now_iso()),
     });
-    fs_utils::write_json(&state.path("checkin_accounts.json"), &accounts)?;
+    fs_utils::write_json(&accounts_path, &accounts)?;
     if let Some(g) = group_id {
         let mut groups: GroupsFile = fs_utils::read_json(&state.path("groups.json"));
         groups.membership.insert(uid, g);
@@ -144,26 +160,77 @@ pub fn account_add_manual(
     Ok(())
 }
 
+/// 从账号列表中移除且仅移除指定单项账号（优先根据 account_id，兜底按 user_id，最多移除 1 个）
+pub fn remove_single_account(
+    accounts: &mut AccountsFile,
+    user_id: &str,
+    account_id: Option<&str>,
+) -> Result<RawAccount, String> {
+    if accounts.accounts.is_empty() {
+        return Err("账号列表为空".into());
+    }
+
+    // 1. 优先通过 account_id 唯一移除目标单项
+    if let Some(aid) = account_id.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(pos) = accounts.accounts.iter().position(|a| {
+            a.id.as_deref() == Some(aid)
+                || crate::models::build_stable_account_id(a) == aid
+        }) {
+            return Ok(accounts.accounts.remove(pos));
+        }
+    }
+
+    // 2. 兜底：按 user_id 精准只移除一个匹配项（绝不使用 retain 批量删除）
+    let uid = user_id.trim();
+    if !uid.is_empty() {
+        if let Some(pos) = accounts.accounts.iter().position(|a| {
+            a.user_id.as_deref() == Some(uid)
+                || jwt::parse(&a.jwt).user_id.as_deref() == Some(uid)
+        }) {
+            return Ok(accounts.accounts.remove(pos));
+        }
+    }
+
+    Err("账号不存在或已被删除".into())
+}
+
 #[tauri::command]
 pub fn account_delete(
     state: State<AppState>,
     user_id: String,
+    account_id: Option<String>,
     delete_profile: bool,
 ) -> Result<(), String> {
-    let mut accounts: AccountsFile = fs_utils::read_json(&state.path("checkin_accounts.json"));
-    accounts
-        .accounts
-        .retain(|a| a.user_id.as_deref() != Some(user_id.as_str()));
-    fs_utils::write_json(&state.path("checkin_accounts.json"), &accounts)?;
+    let accounts_path = state.path("checkin_accounts.json");
+    let mut accounts: AccountsFile = fs_utils::read_json_strict(&accounts_path)?;
 
-    let mut groups: GroupsFile = fs_utils::read_json(&state.path("groups.json"));
-    groups.membership.remove(&user_id);
-    fs_utils::write_json(&state.path("groups.json"), &groups)?;
+    let removed = remove_single_account(&mut accounts, &user_id, account_id.as_deref())?;
 
-    if delete_profile {
-        let p = state.path("profiles").join(&user_id);
-        let _ = std::fs::remove_dir_all(p);
+    fs_utils::write_json(&accounts_path, &accounts)?;
+
+    // 仅当没有其他账号共用该 user_id 时，才清理 group 关系与本地 profile
+    let target_uid = removed
+        .user_id
+        .or_else(|| jwt::parse(&removed.jwt).user_id)
+        .unwrap_or(user_id);
+    let uid = target_uid.trim();
+    if !uid.is_empty() {
+        let still_has_user = accounts.accounts.iter().any(|a| {
+            a.user_id.as_deref() == Some(uid)
+                || jwt::parse(&a.jwt).user_id.as_deref() == Some(uid)
+        });
+        if !still_has_user {
+            let mut groups: GroupsFile = fs_utils::read_json(&state.path("groups.json"));
+            groups.membership.remove(uid);
+            let _ = fs_utils::write_json(&state.path("groups.json"), &groups);
+
+            if delete_profile {
+                let p = state.path("profiles").join(uid);
+                let _ = std::fs::remove_dir_all(p);
+            }
+        }
     }
+
     Ok(())
 }
 
@@ -171,15 +238,31 @@ pub fn account_delete(
 pub fn account_update(
     state: State<AppState>,
     user_id: String,
+    account_id: Option<String>,
     name: Option<String>,
     jwt: Option<String>,
 ) -> Result<(), String> {
-    let mut accounts: AccountsFile = fs_utils::read_json(&state.path("checkin_accounts.json"));
-    let a = accounts
-        .accounts
-        .iter_mut()
-        .find(|a| a.user_id.as_deref() == Some(user_id.as_str()))
-        .ok_or("账号不存在")?;
+    let accounts_path = state.path("checkin_accounts.json");
+    let mut accounts: AccountsFile = fs_utils::read_json_strict(&accounts_path)?;
+    let a = if let Some(ref aid) = account_id.filter(|s| !s.trim().is_empty()) {
+        accounts.accounts.iter_mut().find(|a| {
+            a.id.as_deref() == Some(aid.as_str())
+                || crate::models::build_stable_account_id(a) == *aid
+        })
+    } else {
+        None
+    };
+    let a = match a {
+        Some(acc) => acc,
+        None => accounts
+            .accounts
+            .iter_mut()
+            .find(|a| {
+                a.user_id.as_deref() == Some(user_id.as_str())
+                    || jwt::parse(&a.jwt).user_id.as_deref() == Some(user_id.as_str())
+            })
+            .ok_or("账号不存在")?,
+    };
 
     if let Some(n) = name {
         let n = n.trim().to_string();
@@ -199,7 +282,7 @@ pub fn account_update(
         }
     }
     a.updated_at = Some(fs_utils::now_iso());
-    fs_utils::write_json(&state.path("checkin_accounts.json"), &accounts)?;
+    fs_utils::write_json(&accounts_path, &accounts)?;
     Ok(())
 }
 
@@ -814,6 +897,7 @@ pub fn build_account_views(state: &State<AppState>) -> Vec<AccountView> {
                 .map(|h| h <= 24.0)
                 .unwrap_or(true);
         out.push(AccountView {
+            id: crate::models::build_stable_account_id(a),
             user_id: uid.clone(),
             name: a.name.clone(),
             group_id,
@@ -854,5 +938,125 @@ pub fn resolve_user_ids(
         }
         "selected" => Ok(selected.unwrap_or_default()),
         _ => Err("未知的执行范围".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_remove_single_account_preserves_others() {
+        let mut accounts = AccountsFile {
+            accounts: vec![
+                RawAccount {
+                    id: Some("id-1".into()),
+                    name: "acc1".into(),
+                    user_id: Some("111".into()),
+                    jwt: "j1".into(),
+                    ..Default::default()
+                },
+                RawAccount {
+                    id: Some("id-2".into()),
+                    name: "acc2".into(),
+                    user_id: Some("222".into()),
+                    jwt: "j2".into(),
+                    ..Default::default()
+                },
+                RawAccount {
+                    id: Some("id-3".into()),
+                    name: "acc3".into(),
+                    user_id: Some("333".into()),
+                    jwt: "j3".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+
+        // 删除第 2 个账号
+        let res = remove_single_account(&mut accounts, "222", Some("id-2"));
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap().name, "acc2");
+        assert_eq!(accounts.accounts.len(), 2);
+        assert_eq!(accounts.accounts[0].name, "acc1");
+        assert_eq!(accounts.accounts[1].name, "acc3");
+    }
+
+    #[test]
+    fn test_remove_single_account_prevents_bulk_wipe_when_shared_user_id() {
+        // 关键复现场景：存在 2 个相同 user_id 的账号（如重复捕获或测试）
+        let mut accounts = AccountsFile {
+            accounts: vec![
+                RawAccount {
+                    id: Some("id-1".into()),
+                    name: "auto_29614403_dup1".into(),
+                    user_id: Some("2961440369020169".into()),
+                    jwt: "jwt1".into(),
+                    ..Default::default()
+                },
+                RawAccount {
+                    id: Some("id-2".into()),
+                    name: "auto_29614403_dup2".into(),
+                    user_id: Some("2961440369020169".into()),
+                    jwt: "jwt2".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+
+        // 仅根据 user_id 删除时，也绝不能全部删除，只删除第 1 个匹配项
+        let res = remove_single_account(&mut accounts, "2961440369020169", None);
+        assert!(res.is_ok());
+        assert_eq!(accounts.accounts.len(), 1, "绝不能把全部相同 user_id 的账号一并删除！");
+        assert_eq!(accounts.accounts[0].name, "auto_29614403_dup2");
+
+        // 若指定 account_id，则精确删除对应单项
+        let mut accounts2 = AccountsFile {
+            accounts: vec![
+                RawAccount {
+                    id: Some("id-1".into()),
+                    name: "acc1".into(),
+                    user_id: Some("same_uid".into()),
+                    jwt: "jwt1".into(),
+                    ..Default::default()
+                },
+                RawAccount {
+                    id: Some("id-2".into()),
+                    name: "acc2".into(),
+                    user_id: Some("same_uid".into()),
+                    jwt: "jwt2".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+        let res2 = remove_single_account(&mut accounts2, "same_uid", Some("id-2"));
+        assert!(res2.is_ok());
+        assert_eq!(accounts2.accounts.len(), 1);
+        assert_eq!(accounts2.accounts[0].name, "acc1");
+    }
+
+    #[test]
+    fn test_remove_empty_or_nonexistent_safely() {
+        let mut accounts = AccountsFile {
+            accounts: vec![
+                RawAccount {
+                    id: Some("id-1".into()),
+                    name: "acc1".into(),
+                    user_id: Some("111".into()),
+                    jwt: "j1".into(),
+                    ..Default::default()
+                },
+            ],
+        };
+
+        // 空串不能误删任何账号
+        let res = remove_single_account(&mut accounts, "   ", None);
+        assert!(res.is_err());
+        assert_eq!(accounts.accounts.len(), 1);
+
+        // 不存在的 id 不能误删任何账号
+        let res2 = remove_single_account(&mut accounts, "999", Some("not-exist"));
+        assert!(res2.is_err());
+        assert_eq!(accounts.accounts.len(), 1);
     }
 }

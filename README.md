@@ -57,7 +57,15 @@ Trae Work Assistant 是一款开源的 Windows 桌面工具，为 **Trae** 与 *
 
 - **数据全部本地存储**，不上传任何服务器
 
-## 开发
+## 安装发行版
+
+从 [GitHub Releases](https://github.com/cxqc168-wq/Trae-workbuddyAssistant/releases) 下载 Windows x64 的 MSI 或 EXE 安装程序，选择其中一个安装即可。2.4.7 起安装包包含完整 Python 运行环境、代理依赖库、内置浏览器，以及 WebView2 离线安装组件，无需另装 Node.js、Rust、Python 或浏览器。
+
+发布版保留 license-guard 授权流程，首次使用需输入有效激活口令并连接授权服务器。Trae / WorkBuddy 客户端需按所使用的功能安装；它们的客户端和账号不随本工具分发。代理证书通过应用按需生成和安装，不随安装包分发。
+
+Release 附带 `SHA256SUMS.txt` 和 `runtime-manifest.json`，用于校验安装包与内置组件。
+
+## 开发与构建
 
 ```powershell
 npm install
@@ -66,6 +74,8 @@ npm run tauri build    # 打包（msi + nsis）
 ```
 
 前置：Node.js 18+、Rust 1.75+、Python 3.9+、WebView2 Runtime、VS Build Tools (C++)
+
+Windows 发布构建还需要构建机的 Python 3.11+ 和 pip，以及首次下载运行时所需的网络连接。`npm run tauri build` 自动运行 `release:prepare`，下载固定版本的 Windows Python 与完整浏览器、安装固定版本的 wheel 依赖并执行隔离环境检查，再构建安装包。生成资源位于 `resources/python/` 和 `resources/browser/`，不提交到 Git。详见 [Windows 发布说明](docs/windows-release.md)。
 
 ## 数据目录
 

@@ -520,7 +520,8 @@ def update_account_jwt(user_id, jwt_full):
         accounts = cfg.get("accounts", [])
         target = None
         for a in accounts:
-            if str(a.get("UserID", "")) == str(user_id):
+            a_uid = a.get("UserID") or a.get("user_id") or a.get("userId")
+            if a_uid is not None and str(a_uid) == str(user_id):
                 target = a
                 break
         if target:
@@ -541,7 +542,7 @@ def update_account_jwt(user_id, jwt_full):
         # 新账号
         new_acc = {
             "name": f"auto_{str(user_id)[:8]}",
-            "UserID": user_id,
+            "UserID": str(user_id),
             "jwt": jwt_full,
             "added_at": datetime.datetime.now().isoformat(timespec="seconds"),
         }
@@ -559,7 +560,8 @@ def update_account_refresh_token(user_id, refresh_token):
         accounts = cfg.get("accounts", [])
         target = None
         for a in accounts:
-            if str(a.get("UserID", "")) == str(user_id):
+            a_uid = a.get("UserID") or a.get("user_id") or a.get("userId")
+            if a_uid is not None and str(a_uid) == str(user_id):
                 target = a
                 break
         if not target:

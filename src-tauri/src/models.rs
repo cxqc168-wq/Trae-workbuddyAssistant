@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 #[derive(Serialize, Clone, Default)]
 pub struct AccountView {
+    #[serde(default)]
+    pub id: String,
     pub user_id: String,
     pub name: String,
     pub group_id: Option<String>,
@@ -21,11 +23,61 @@ pub struct AccountView {
     pub credits_expire_at: Option<i64>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+pub fn deserialize_flexible_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum FlexibleValue {
+        String(String),
+        Int(i64),
+        Float(f64),
+        Null,
+    }
+
+    match Option::<FlexibleValue>::deserialize(deserializer)? {
+        Some(FlexibleValue::String(s)) => {
+            let t = s.trim().to_string();
+            if t.is_empty() { Ok(None) } else { Ok(Some(t)) }
+        }
+        Some(FlexibleValue::Int(n)) => Ok(Some(n.to_string())),
+        Some(FlexibleValue::Float(f)) => Ok(Some((f as i64).to_string())),
+        Some(FlexibleValue::Null) | None => Ok(None),
+    }
+}
+
+pub fn build_stable_account_id(a: &RawAccount) -> String {
+    if let Some(ref id) = a.id {
+        let t = id.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(a.name.as_bytes());
+    h.update(a.user_id.as_deref().unwrap_or("").as_bytes());
+    h.update(a.jwt.as_bytes());
+    let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    format!("acc-{}", &hex[..12])
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct RawAccount {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
     pub name: String,
-    #[serde(rename = "UserID", default)]
+    #[serde(
+        rename = "UserID",
+        alias = "user_id",
+        alias = "userId",
+        default,
+        deserialize_with = "deserialize_flexible_string"
+    )]
     pub user_id: Option<String>,
+    #[serde(default)]
     pub jwt: String,
     #[serde(default)]
     pub refresh_token: Option<String>,
@@ -35,9 +87,35 @@ pub struct RawAccount {
     pub updated_at: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Clone, Default)]
 pub struct AccountsFile {
+    #[serde(default)]
     pub accounts: Vec<RawAccount>,
+}
+
+impl<'de> serde::Deserialize<'de> for AccountsFile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct ObjectFormat {
+            #[serde(default)]
+            accounts: Vec<RawAccount>,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Helper {
+            Object(ObjectFormat),
+            Array(Vec<RawAccount>),
+        }
+
+        match Helper::deserialize(deserializer)? {
+            Helper::Object(o) => Ok(AccountsFile { accounts: o.accounts }),
+            Helper::Array(a) => Ok(AccountsFile { accounts: a }),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -75,7 +153,7 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub launch_minimized: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub auto_start_proxy: bool,
     #[serde(default = "default_true")]
     pub tray: bool,
@@ -122,6 +200,10 @@ fn default_port() -> u16 {
 fn default_theme() -> String {
     "system".into()
 }
+fn default_false() -> bool {
+    false
+}
+
 fn default_true() -> bool {
     true
 }
@@ -247,4 +329,77 @@ pub struct ApiServiceStatus {
     pub active_uid: Option<String>,
     pub last_error: Option<String>,
     pub started_at: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_raw_account_deserialization_flexible() {
+        // 1. UserID 作为数字
+        let json_num = r#"{"name":"test1","UserID":3031813081815523,"jwt":"eyJ..."}"#;
+        let acc1: RawAccount = serde_json::from_str(json_num).unwrap();
+        assert_eq!(acc1.user_id.as_deref(), Some("3031813081815523"));
+
+        // 2. user_id 小写别名
+        let json_lower = r#"{"name":"test2","user_id":"987654321","jwt":"eyJ..."}"#;
+        let acc2: RawAccount = serde_json::from_str(json_lower).unwrap();
+        assert_eq!(acc2.user_id.as_deref(), Some("987654321"));
+
+        // 3. userId 驼峰别名
+        let json_camel = r#"{"name":"test3","userId":"55555","jwt":"eyJ..."}"#;
+        let acc3: RawAccount = serde_json::from_str(json_camel).unwrap();
+        assert_eq!(acc3.user_id.as_deref(), Some("55555"));
+
+        // 4. UserID 为空或 null
+        let json_null = r#"{"name":"test4","UserID":null,"jwt":"eyJ..."}"#;
+        let acc4: RawAccount = serde_json::from_str(json_null).unwrap();
+        assert_eq!(acc4.user_id, None);
+    }
+
+    #[test]
+    fn test_accounts_file_formats() {
+        // 标准对象格式
+        let obj_json = r#"{"accounts":[{"name":"a1","UserID":"111","jwt":"j1"}]}"#;
+        let file1: AccountsFile = serde_json::from_str(obj_json).unwrap();
+        assert_eq!(file1.accounts.len(), 1);
+        assert_eq!(file1.accounts[0].name, "a1");
+
+        // 数组格式
+        let arr_json = r#"[{"name":"a2","UserID":"222","jwt":"j2"},{"name":"a3","UserID":333,"jwt":"j3"}]"#;
+        let file2: AccountsFile = serde_json::from_str(arr_json).unwrap();
+        assert_eq!(file2.accounts.len(), 2);
+        assert_eq!(file2.accounts[0].name, "a2");
+        assert_eq!(file2.accounts[1].user_id.as_deref(), Some("333"));
+    }
+
+    #[test]
+    fn test_stable_account_id() {
+        let mut a = RawAccount {
+            id: Some("custom-id-1".into()),
+            name: "acc1".into(),
+            user_id: Some("123".into()),
+            jwt: "token1".into(),
+            ..Default::default()
+        };
+        assert_eq!(build_stable_account_id(&a), "custom-id-1");
+
+        a.id = None;
+        let id1 = build_stable_account_id(&a);
+        assert!(id1.starts_with("acc-"));
+        // 幂等：再次计算相同
+        assert_eq!(build_stable_account_id(&a), id1);
+
+        // 不同账号生成不同 id
+        let a2 = RawAccount {
+            id: None,
+            name: "acc2".into(),
+            user_id: Some("123".into()), // 即使 user_id 相同，name 不同其 id 也不同
+            jwt: "token2".into(),
+            ..Default::default()
+        };
+        let id2 = build_stable_account_id(&a2);
+        assert_ne!(id1, id2);
+    }
 }

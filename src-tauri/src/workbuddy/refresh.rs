@@ -28,12 +28,15 @@ pub fn persist_account(acc: &Value) {
 
 /// 按 id 删除账号；不存在返回 Err。
 pub fn delete_account(account_id: &str) -> Result<(), String> {
+    if account_id.trim().is_empty() {
+        return Err("无效账号 ID".into());
+    }
     let _lock = store_write_lock().lock().unwrap();
     let path = super::store_path().join("workbuddy_accounts.json");
     let mut list = load_accounts_from_path(&path);
-    let before = list.len();
-    list.retain(|a| a.get("id").and_then(|v| v.as_str()) != Some(account_id));
-    if list.len() == before {
+    if let Some(pos) = list.iter().position(|a| a.get("id").and_then(|v| v.as_str()) == Some(account_id)) {
+        list.remove(pos);
+    } else {
         return Err("账号不存在".into());
     }
     save_accounts_to_path(&path, &list).map_err(|e| e.to_string())

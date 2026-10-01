@@ -10,4 +10,7 @@ pub mod oauth;
 pub mod profile;
 pub mod proxy;
 pub mod switch;
+pub mod trae_auth;
+pub mod trae_session;
 pub mod workbuddy;
+pub mod workbuddy_session;

@@ -19,9 +19,6 @@ import {
   Camera,
   Download,
   Upload,
-  Globe,
-  ExternalLink,
-  ArrowRight,
   Save,
   ScanSearch,
 } from 'lucide-react';
@@ -118,7 +115,6 @@ export default function Accounts() {
   const profileBackup = useAppStore((s) => s.profileBackup);
   const profileRestore = useAppStore((s) => s.profileRestore);
   const profileDelete = useAppStore((s) => s.profileDelete);
-  const oauthLogin = useAppStore((s) => s.oauthLogin);
   const refreshProfiles = useAppStore((s) => s.refreshProfiles);
 
   const [filter, setFilter] = useState<string>('all');
@@ -127,7 +123,6 @@ export default function Accounts() {
   const [editTarget, setEditTarget] = useState<AccountView | null>(null);
   const [jwtTarget, setJwtTarget] = useState<AccountView | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [oauthOpen, setOAuthOpen] = useState(false);
   const [extractOpen, setExtractOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
@@ -144,7 +139,7 @@ export default function Accounts() {
 
   const onDelete = async (a: AccountView) => {
     if (!confirm(`确认删除账号「${a.name}」？${a.device_id_masked ? '（会一并清理设备 ID）' : ''}`)) return;
-    await deleteAccount(a.user_id, true);
+    await deleteAccount(a.user_id, true, a.id);
   };
 
   const copyJwt = async (jwt: string) => {
@@ -198,9 +193,6 @@ export default function Accounts() {
             </button>
             <button onClick={() => { void refreshProfiles(); setProfileOpen(true); }} className="btn-outline">
               <Camera size={15} /> 快照管理
-            </button>
-            <button onClick={() => setOAuthOpen(true)} className="btn-outline">
-              <Globe size={15} /> OAuth 登录
             </button>
             <button onClick={() => setExtractOpen(true)} className="btn-outline" title="启动浏览器登录 trae.cn 并自动提取 JWT">
               <ScanSearch size={15} /> 浏览器提取
@@ -265,9 +257,9 @@ export default function Accounts() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((a) => {
+                {filtered.map((a, idx) => {
                   return (
-                    <tr key={a.user_id} className="border-t border-slate-200 dark:border-zinc-800">
+                    <tr key={a.id || `${a.user_id}-${a.name}-${idx}`} className="border-t border-slate-200 dark:border-zinc-800">
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="font-medium">{a.name}</div>
                         <div className="text-xs text-slate-400">{a.user_id}</div>
@@ -406,7 +398,7 @@ export default function Accounts() {
         onSubmit={async (name, jwt) => {
           if (!editTarget) return;
           try {
-            await updateAccount(editTarget.user_id, name, jwt);
+            await updateAccount(editTarget.user_id, name, jwt, editTarget.id);
             setEditTarget(null);
           } catch {
             /* toast 已发出 */
@@ -448,19 +440,6 @@ export default function Accounts() {
           await profileDelete(slot);
         }}
       />
-      <OAuthLoginModal
-        open={oauthOpen}
-        onClose={() => setOAuthOpen(false)}
-        groups={groups}
-        onLogin={async (callbackUrl, accountName, groupId) => {
-          try {
-            await oauthLogin(callbackUrl, accountName, groupId);
-            setOAuthOpen(false);
-          } catch {
-            /* toast 已发出 */
-          }
-        }}
-      />
       <BrowserExtractModal
         open={extractOpen}
         onClose={() => setExtractOpen(false)}
@@ -492,26 +471,35 @@ export default function Accounts() {
               <div className="text-slate-400">等待脚本输出…</div>
             ) : (
               switchProgress.map((line, i) => {
-                try {
-                  const obj = JSON.parse(line);
+                let obj: { stage?: string; message?: string; status?: string } | null = null;
+                if (typeof line === 'object' && line !== null) {
+                  obj = line as unknown as { stage?: string; message?: string; status?: string };
+                } else if (typeof line === 'string') {
+                  try {
+                    obj = JSON.parse(line);
+                  } catch {
+                    // plain text
+                  }
+                }
+                if (obj && typeof obj === 'object' && ('stage' in obj || 'message' in obj)) {
                   const color =
-                    obj.status === 'error'
+                    obj.status === 'error' || obj.stage === 'fatal'
                       ? 'text-rose-500'
                       : obj.status === 'ok' || obj.stage === 'done'
                         ? 'text-emerald-600'
                         : 'text-slate-600 dark:text-zinc-300';
                   return (
                     <div key={i} className={color}>
-                      [{obj.stage}] {obj.message}
-                    </div>
-                  );
-                } catch {
-                  return (
-                    <div key={i} className="text-slate-500">
-                      {line}
+                      [{obj.stage || 'info'}] {obj.message || ''}
                     </div>
                   );
                 }
+                const text = typeof line === 'string' ? line : JSON.stringify(line);
+                return (
+                  <div key={i} className="text-slate-500">
+                    {text}
+                  </div>
+                );
               })
             )}
           </div>
@@ -1106,260 +1094,6 @@ function ProfileModal({
   );
 }
 
-function OAuthLoginModal({
-  open,
-  onClose,
-  groups,
-  onLogin,
-}: {
-  open: boolean;
-  onClose: () => void;
-  groups: GroupView[];
-  onLogin: (
-    callbackUrl: string,
-    accountName?: string,
-    groupId?: string,
-  ) => Promise<void>;
-}) {
-  const [step, setStep] = useState(1);
-  const [callbackUrl, setCallbackUrl] = useState('');
-  const [accountName, setAccountName] = useState('');
-  const [gid, setGid] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [opening, setOpening] = useState(false);
-  const toast = useAppStore((s) => s.pushToast);
-
-  useEffect(() => {
-    if (!open) {
-      setStep(1);
-      setCallbackUrl('');
-      setAccountName('');
-      setGid('');
-      setBusy(false);
-      setOpening(false);
-    }
-  }, [open]);
-
-  // 监听本地回调服务器推送的授权结果：官网完成授权后会重定向到
-  // 127.0.0.1:17388/authorize，后端接住并通过 oauth-callback 事件
-  // 把完整回调 URL 发到这里，自动填充并进入下一步
-  useEffect(() => {
-    if (!open) return;
-    let un: (() => void) | undefined;
-    let alive = true;
-    void import('@tauri-apps/api/event').then(({ listen }) =>
-      listen<string>('oauth-callback', (e) => {
-        if (!e.payload) return;
-        setCallbackUrl(e.payload);
-        setStep(3);
-        toast('success', '已接收 OAuth 回调，请确认并完成登录');
-      }).then((f) => {
-        if (alive) {
-          un = f;
-        } else {
-          f();
-        }
-      }),
-    );
-    return () => {
-      alive = false;
-      un?.();
-    };
-  }, [open, toast]);
-
-  // 关闭弹窗时停止本地回调服务器，释放 17388 端口
-  useEffect(() => {
-    if (open) return;
-    void api.oauth.callbackStop().catch(() => {});
-  }, [open]);
-
-  const openLoginPage = async () => {
-    setOpening(true);
-    try {
-      // 先启动本地回调监听：官网授权页会探测本地 17388 端口确认
-      // "客户端在线"，没有监听会一直卡在"认证中，正在验证身份"
-      try {
-        await api.oauth.callbackStart();
-      } catch (err) {
-        toast(
-          'warn',
-          `本地回调监听启动失败：${String(err)}。若官网长时间卡在"认证中"，请关闭占用 17388 端口的程序后重试`,
-        );
-      }
-      const { url } = await api.oauth.getLoginUrl();
-      const { open } = await import('@tauri-apps/plugin-shell');
-      await open(url);
-      setStep(2);
-    } catch (err) {
-      toast('error', `获取登录 URL 失败：${String(err)}`);
-    } finally {
-      setOpening(false);
-    }
-  };
-
-  const finish = async () => {
-    if (!callbackUrl.trim()) return;
-    setBusy(true);
-    try {
-      await onLogin(
-        callbackUrl.trim(),
-        accountName.trim() || undefined,
-        gid || undefined,
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="OAuth 登录"
-      footer={
-        <>
-          {step > 1 && (
-            <button
-              onClick={() => setStep((s) => Math.max(1, s - 1))}
-              className="btn-ghost"
-              disabled={busy || opening}
-            >
-              上一步
-            </button>
-          )}
-          <button onClick={onClose} className="btn-ghost" disabled={busy || opening}>
-            取消
-          </button>
-          {step === 1 && (
-            <button
-              onClick={openLoginPage}
-              disabled={opening}
-              className="btn-primary"
-            >
-              {opening ? '正在打开...' : '打开登录页'}
-              {!opening && <ExternalLink size={14} />}
-            </button>
-          )}
-          {step === 2 && (
-            <button
-              onClick={() => setStep(3)}
-              disabled={!callbackUrl.trim()}
-              className="btn-primary"
-            >
-              下一步 <ArrowRight size={14} />
-            </button>
-          )}
-          {step === 3 && (
-            <button
-              onClick={finish}
-              disabled={busy || !callbackUrl.trim()}
-              className="btn-primary"
-            >
-              {busy ? '登录中...' : '完成登录'}
-            </button>
-          )}
-        </>
-      }
-    >
-      <div className="space-y-4">
-        {/* 步骤指示器 */}
-        <div className="flex items-center gap-2">
-          <div
-            className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-              step >= 1
-                ? 'bg-brand-500 text-white'
-                : 'bg-slate-200 text-slate-500 dark:bg-zinc-700'
-            }`}
-          >
-            1
-          </div>
-          <div
-            className={`h-0.5 w-8 ${step > 1 ? 'bg-brand-500' : 'bg-slate-200 dark:bg-zinc-700'}`}
-          />
-          <div
-            className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-              step >= 2
-                ? 'bg-brand-500 text-white'
-                : 'bg-slate-200 text-slate-500 dark:bg-zinc-700'
-            }`}
-          >
-            2
-          </div>
-          <div
-            className={`h-0.5 w-8 ${step > 2 ? 'bg-brand-500' : 'bg-slate-200 dark:bg-zinc-700'}`}
-          />
-          <div
-            className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-              step >= 3
-                ? 'bg-brand-500 text-white'
-                : 'bg-slate-200 text-slate-500 dark:bg-zinc-700'
-            }`}
-          >
-            3
-          </div>
-        </div>
-
-        {step === 1 && (
-          <div className="text-sm text-slate-600 dark:text-zinc-300">
-            点击「打开登录页」在浏览器中发起 OAuth 登录，完成后将自动进入下一步。
-          </div>
-        )}
-
-        {step === 2 && (
-          <div>
-            <div className="mb-3 flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
-              <Loader2 size={13} className="animate-spin" />
-              正在等待浏览器完成授权，回调将自动填入…
-            </div>
-            <label className="label">回调 URL</label>
-            <textarea
-              value={callbackUrl}
-              onChange={(e) => setCallbackUrl(e.target.value)}
-              className="input min-h-[100px] font-mono text-xs"
-              placeholder="http://127.0.0.1:17388/authorize?code=..."
-            />
-            <p className="mt-2 text-xs text-slate-400">
-              授权完成后会自动填入。若浏览器未跳转或自动填充失败，可将地址栏完整 URL 手动复制粘贴到此处
-            </p>
-            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-              若长时间停留在「认证中」（常见于指纹浏览器代理、17388 端口被占用），请关闭本弹窗，改用「浏览器提取」登录
-            </p>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div className="space-y-3">
-            <div>
-              <label className="label">账号备注名（可选）</label>
-              <input
-                value={accountName}
-                onChange={(e) => setAccountName(e.target.value)}
-                className="input"
-                placeholder="例如：me_1676"
-              />
-            </div>
-            <div>
-              <label className="label">分组（可选）</label>
-              <select
-                value={gid}
-                onChange={(e) => setGid(e.target.value)}
-                className="input"
-              >
-                <option value="">不分组</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
 function BrowserExtractModal({
   open,
   onClose,
@@ -1474,11 +1208,11 @@ function BrowserExtractModal({
       <div className="space-y-4">
         {/* 步骤说明 */}
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-          1. 点击「启动提取浏览器」——应用会自动打开内置浏览器并直达 Trae 登录页；
+          1. 点击「启动提取浏览器」——系统将自动调用独立浏览器打开 Trae 登录页；
           <br />
-          2. 请在弹出的浏览器页面中完成账号登录，系统将在您登录成功瞬间自动抓取 JWT 并自动关闭浏览器保存账号；
+          2. 请在弹出的浏览器中登录（支持手机验证码、微信扫码、账号密码等任意方式）；
           <br />
-          3. 若需要提取多个账号，点击「重新启动」重复上述操作即可。
+          3. 登录成功后，系统将通过双重探查机制（实时网络拦截 + 本地凭据秒级扫描）自动捕获 JWT，并自动关闭浏览器完成保存。
         </div>
 
         {/* 分组（启动前选择，仅对新增账号生效） */}
@@ -1552,11 +1286,11 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
       <div className="space-y-4 text-sm">
         <section className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-900/20">
           <h3 className="mb-1 flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
-            <Globe size={15} /> OAuth 登录（自动保存账号）
+            <ScanSearch size={15} /> 浏览器提取（自动获取 JWT）
           </h3>
           <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">
-            点击「OAuth 登录」按钮，在浏览器中完成 Trae Work 账号登录。登录完成后将回调 URL 粘贴回应用，
-            系统会自动解析 JWT 并保存账号信息，无需手动粘贴 token。适合首次添加账号或 JWT 过期后重新登录。
+            点击「浏览器提取」按钮，系统会启动独立浏览器窗口打开登录页。登录完成后会自动拦截并捕获
+            JWT 保存至账号列表，无需手动复制粘贴 token。
           </p>
         </section>
 

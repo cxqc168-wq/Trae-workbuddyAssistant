@@ -1,6 +1,6 @@
 [package]
 name = "trae-work-assistant"
-version = "2.4.6"
+version = "2.4.7"
 description = "Trae Work 助手 - 多账号签到与管理桌面端"
 edition = "2021"
 rust-version = "1.77"
@@ -31,6 +31,19 @@ uuid = { version = "1", features = ["v4"] }
 winreg = "0.52"
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
 futures = "0.3"
+rusqlite = { version = "0.31", features = ["bundled"] }
+scrypt = { version = "0.11", default-features = false }
+aes-gcm = "0.10"
+flate2 = "1.0"
+tar = "0.4"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hmac = "0.12"
+pbkdf2 = { version = "0.12", default-features = false }
+hex = "0.4"
+winapi = { version = "0.3", features = ["tlhelp32", "processthreadsapi", "memoryapi", "winnt", "handleapi", "minwindef"] }
+rand = "0.8"
+md-5 = "0.10"
 
 [features]
 # 仅桌面端

@@ -38,7 +38,7 @@ if not exist "node_modules" (
 
 echo [START] Launching Tauri dev mode (first Rust build may take a while)...
 echo.
-call npm run tauri dev
+node scripts/start-dev.mjs
 
 if errorlevel 1 (
     echo.

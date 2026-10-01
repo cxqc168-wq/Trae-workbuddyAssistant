@@ -321,6 +321,7 @@ pub fn oauth_login(
     } else {
         // 新账号
         accounts.accounts.push(RawAccount {
+            id: Some(format!("acc-{}", uuid::Uuid::new_v4().simple())),
             name: name.clone(),
             user_id: Some(user_id.clone()),
             jwt: jwt.clone(),

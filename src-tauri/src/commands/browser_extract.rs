@@ -142,23 +142,101 @@ pub(crate) fn normalize_token(raw: &str) -> String {
     format!("Cloud-IDE-JWT {}", token)
 }
 
-/// 是否为 trae API 请求（JWT 出现在这些请求的 Authorization 头中）。
-/// 同时匹配国内站 api.trae.cn 和国际站 api.trae.com.cn。
+/// 是否为 trae 相关请求（JWT 可能出现在这些请求的 Authorization / Token / Cookie 头中）。
+/// 包含 trae.cn / trae.com.cn / zijieapi.com / bytedance.com。
 pub(crate) fn is_trae_api_url(url: &str) -> bool {
-    url.contains("api.trae.cn") || url.contains("api.trae.com.cn")
+    let u = url.to_ascii_lowercase();
+    (u.contains("trae.cn")
+        || u.contains("trae.com.cn")
+        || u.contains("zijieapi.com")
+        || u.contains("bytedance.com"))
+        && !u.ends_with(".js")
+        && !u.ends_with(".css")
+        && !u.ends_with(".png")
+        && !u.ends_with(".jpg")
+        && !u.ends_with(".svg")
+        && !u.ends_with(".ico")
+        && !u.ends_with(".woff2")
 }
 
-/// 从 CDP 请求头 JSON 中提取 Authorization 值（头名大小写不敏感）。
+/// 在任意文本中智能提取有效 JWT 字符串（支持包含在 JSON、URL、Cookie、Header 中的 token）
+pub(crate) fn find_jwt_in_text(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // 搜索文本中所有形如 eyJ... 的 JWT 片段（标准 JWT 以 {" 编码开头的 eyJ 起始）
+    let mut search_from = 0;
+    while let Some(start_idx) = trimmed[search_from..].find("eyJ") {
+        let abs_start = search_from + start_idx;
+        let rest = &trimmed[abs_start..];
+        // JWT 仅由 [a-zA-Z0-9_\-] 和 '.' 组成
+        let len = rest
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.')
+            .unwrap_or(rest.len());
+        let candidate = &rest[..len];
+        let dot_count = candidate.chars().filter(|&c| c == '.').count();
+        if dot_count >= 2 {
+            let candidate_norm = normalize_token(candidate);
+            let candidate_info = jwt::parse(&candidate_norm);
+            if candidate_info.user_id.is_some() {
+                return Some(candidate_norm);
+            }
+        }
+        search_from = abs_start + 3;
+    }
+
+    None
+}
+
+/// 从 CDP 请求头 JSON 中提取有效 Token 值（头名大小写不敏感，支持多头、Cookie 以及通用 JWT 扫描）。
 /// 入参为 CDP `Network.Request.headers`（Headers newtype 的 inner，
 /// 形如 {"Authorization": "Bearer x", ...}；非对象时返回 None）
 pub(crate) fn auth_header(headers: &serde_json::Value) -> Option<String> {
     let obj = headers.as_object()?;
+    // 1. 优先检查显式 Token 头（大小写不敏感）
     for (k, v) in obj {
-        if k.eq_ignore_ascii_case("authorization") {
+        let lk = k.to_ascii_lowercase();
+        if lk == "authorization"
+            || lk == "x-cloudide-token"
+            || lk == "x-icube-token"
+            || lk == "x-tt-token"
+            || lk == "token"
+        {
             if let Some(s) = v.as_str() {
-                if !s.trim().is_empty() {
-                    return Some(s.to_string());
+                let token = s.trim();
+                if !token.is_empty() {
+                    return Some(token.to_string());
                 }
+            }
+        }
+    }
+    // 2. 检查 Cookie 头中可能携带的 cloud_ide_jwt / passport_jwt / token
+    for (k, v) in obj {
+        if k.eq_ignore_ascii_case("cookie") {
+            if let Some(s) = v.as_str() {
+                for part in s.split(';') {
+                    let trimmed = part.trim();
+                    if let Some(val) = trimmed
+                        .strip_prefix("cloud_ide_jwt=")
+                        .or_else(|| trimmed.strip_prefix("passport_jwt="))
+                        .or_else(|| trimmed.strip_prefix("token="))
+                    {
+                        let token = val.trim();
+                        if !token.is_empty() {
+                            return Some(token.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 3. 通用深度扫描：对任意 Header 键值尝试提取 JWT
+    for (_k, v) in obj {
+        if let Some(s) = v.as_str() {
+            if let Some(jwt) = find_jwt_in_text(s) {
+                return Some(jwt);
             }
         }
     }
@@ -202,6 +280,9 @@ use serde_json::json;
 use tauri::{Emitter, Manager, State};
 use tokio::process::{Child, Command};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use crate::fs_utils;
 use crate::jwt;
 use crate::models::{AccountsFile, GroupsFile, RawAccount};
@@ -210,15 +291,27 @@ use crate::state::AppState;
 /// 提取会话句柄：浏览器子进程 + CDP 任务集合 + 临时 Profile 路径
 pub struct BrowserExtractHandle {
     pub child: Child,
-    pub browser: Browser,
+    pub browser: Arc<tokio::sync::Mutex<Browser>>,
     pub tasks: Vec<tokio::task::JoinHandle<()>>,
     pub profile_dir: PathBuf,
 }
 
 impl BrowserExtractHandle {
+    /// 强杀进程树（彻底杀掉 Chrome / Edge 的 renderer、gpu-process、crashpad 等子进程）
+    pub fn kill_process_tree(&mut self) {
+        #[cfg(windows)]
+        if let Some(pid) = self.child.id() {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output();
+        }
+        let _ = self.child.start_kill();
+    }
+
     /// 同步强杀并清理临时目录（应用退出等无 await 环境使用）。
     pub fn kill_now(&mut self) {
-        let _ = self.child.start_kill();
+        self.kill_process_tree();
         for t in self.tasks.drain(..) {
             t.abort();
         }
@@ -268,20 +361,95 @@ if (!window.chrome.csi) {
 }
 "#;
 
-/// 为指定页面挂载 Network 监听，拦截 trae API 请求的 Authorization 头
+/// 处理捕获到的 JWT：去重、保存账号、通知前端并触发延迟关闭
+pub(crate) async fn handle_jwt_capture(
+    jwt: &str,
+    app: &tauri::AppHandle,
+    captured: &Arc<Mutex<HashSet<String>>>,
+    group_id: &Option<String>,
+) -> bool {
+    let norm = normalize_token(jwt);
+    let info = jwt::parse(&norm);
+    let Some(user_id) = info.user_id else {
+        return false;
+    };
+
+    {
+        let mut set = captured.lock().unwrap_or_else(|e| e.into_inner());
+        if set.contains(&user_id) {
+            return false;
+        }
+        set.insert(user_id.clone());
+    }
+
+    let app_c = app.clone();
+    let jwt_c = norm.clone();
+    let uid_c = user_id.clone();
+    let gid_c = group_id.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        save_captured_account(&app_c, &jwt_c, &uid_c, &gid_c)
+    })
+    .await;
+
+    let res = match res {
+        Ok(r) => r,
+        Err(e) => Err(format!("后台任务异常：{e}")),
+    };
+
+    match res {
+        Ok((name, is_new)) => {
+            let _ = app.emit(
+                "browser-extract-captured",
+                json!({
+                    "user_id": user_id,
+                    "name": name,
+                    "exp_hours": info.exp_hours,
+                    "is_new": is_new,
+                }),
+            );
+            let _ = app.emit(
+                "browser-extract-progress",
+                progress("started", &format!("已成功抓取账号 [{name}] JWT，正在自动保存并关闭浏览器…")),
+            );
+            // 满足需求：用户完成登录并成功抓取到 JWT 后自动关闭浏览器
+            let app_stop = app.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                let rt = app_stop.state::<Mutex<Option<BrowserExtractHandle>>>();
+                let _ = browser_extract_stop(app_stop.clone(), rt).await;
+            });
+            true
+        }
+        Err(e) => {
+            let _ = app.emit(
+                "browser-extract-progress",
+                progress("error", &format!("保存账号 [{user_id}] 失败：{e}")),
+            );
+            let mut set = captured.lock().unwrap_or_else(|e| e.into_inner());
+            set.remove(&user_id);
+            false
+        }
+    }
+}
+
+/// 为指定页面挂载 Network 监听，拦截 trae API 请求的 Authorization/Cookie/URL 中的 JWT
 fn attach_page_network_listener(
     page: chromiumoxide::Page,
     app: tauri::AppHandle,
     captured: Arc<Mutex<HashSet<String>>>,
+    attached_page_ids: Arc<Mutex<HashSet<String>>>,
     group_id: Option<String>,
     tasks: &mut Vec<tokio::task::JoinHandle<()>>,
 ) {
+    let tid = page.target_id().as_ref().to_string();
     tasks.push(tokio::spawn(async move {
         let _ = page.execute(AddScriptToEvaluateOnNewDocumentParams::new(STEALTH_SCRIPT)).await;
         if page.execute(EnableParams::default()).await.is_err() {
+            attached_page_ids.lock().unwrap_or_else(|e| e.into_inner()).remove(&tid);
             return;
         }
         let Ok(mut events) = page.event_listener::<EventRequestWillBeSent>().await else {
+            attached_page_ids.lock().unwrap_or_else(|e| e.into_inner()).remove(&tid);
             return;
         };
         let _keep_alive = page;
@@ -289,69 +457,21 @@ fn attach_page_network_listener(
             if !is_trae_api_url(&ev.request.url) {
                 continue;
             }
-            let Some(auth) = auth_header(ev.request.headers.inner()) else {
-                continue;
-            };
-            let jwt = normalize_token(&auth);
-            let info = jwt::parse(&jwt);
-            let Some(user_id) = info.user_id else {
-                continue;
-            };
-            {
-                let mut set = captured.lock().unwrap_or_else(|e| e.into_inner());
-                if set.contains(&user_id) {
+            // 1. 优先尝试从 URL 中嗅探 JWT
+            if let Some(jwt) = find_jwt_in_text(&ev.request.url) {
+                if handle_jwt_capture(&jwt, &app, &captured, &group_id).await {
                     continue;
                 }
-                set.insert(user_id.clone());
             }
-
-            let app_c = app.clone();
-            let jwt_c = jwt.clone();
-            let uid_c = user_id.clone();
-            let gid_c = group_id.clone();
-            let res = tokio::task::spawn_blocking(move || {
-                save_captured_account(&app_c, &jwt_c, &uid_c, &gid_c)
-            })
-            .await;
-
-            let res = match res {
-                Ok(r) => r,
-                Err(e) => Err(format!("后台任务异常：{e}")),
-            };
-
-            match res {
-                Ok((name, is_new)) => {
-                    let _ = app.emit(
-                        "browser-extract-captured",
-                        json!({
-                            "user_id": user_id,
-                            "name": name,
-                            "exp_hours": info.exp_hours,
-                            "is_new": is_new,
-                        }),
-                    );
-                    let _ = app.emit(
-                        "browser-extract-progress",
-                        progress("started", &format!("已成功抓取账号 [{name}] JWT，正在自动关闭浏览器…")),
-                    );
-                    // 满足需求：用户完成登录并成功抓取到 JWT 后自动关闭浏览器
-                    let app_stop = app.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-                        let rt = app_stop.state::<Mutex<Option<BrowserExtractHandle>>>();
-                        let _ = browser_extract_stop(rt).await;
-                    });
-                }
-                Err(e) => {
-                    let _ = app.emit(
-                        "browser-extract-progress",
-                        progress("error", &format!("保存账号 [{user_id}] 失败：{e}")),
-                    );
-                    let mut set = captured.lock().unwrap_or_else(|e| e.into_inner());
-                    set.remove(&user_id);
+            // 2. 从 Headers 中提取 Token / Cookie / JWT
+            if let Some(auth) = auth_header(ev.request.headers.inner()) {
+                if handle_jwt_capture(&auth, &app, &captured, &group_id).await {
+                    continue;
                 }
             }
         }
+        // 页面跳转或刷新后旧 Target 事件流退出，从 attached 集合中移除以允许重新挂载监听
+        attached_page_ids.lock().unwrap_or_else(|e| e.into_inner()).remove(&tid);
     }));
 }
 
@@ -364,23 +484,14 @@ pub async fn browser_extract_start(
     runtime: State<'_, Mutex<Option<BrowserExtractHandle>>>,
     group_id: Option<String>,
 ) -> Result<(), String> {
-    // 0. 旧会话清理：浏览器已退出 → 清掉旧句柄重开；仍在运行 → 幂等返回
-    {
+    // 0. 旧会话清理：若存在旧句柄（不论是否存活），彻底杀除并清理，保证新提取拥有干净独立的进程与 Profile
+    let mut old_handle = {
         let mut guard = runtime.lock().unwrap_or_else(|e| e.into_inner());
-        let running = match guard.as_mut() {
-            Some(h) => h.child.try_wait().map(|s| s.is_none()).unwrap_or(false),
-            None => false,
-        };
-        if running {
-            let _ = app.emit(
-                "browser-extract-progress",
-                progress("started", "提取浏览器已在运行，请在浏览器中登录 trae.cn"),
-            );
-            return Ok(());
-        }
-        if let Some(mut old) = guard.take() {
-            old.kill_now();
-        }
+        guard.take()
+    };
+    if let Some(mut old) = old_handle.take() {
+        old.kill_now();
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
 
     // 1. 内置浏览器发现
@@ -443,13 +554,14 @@ pub async fn browser_extract_start(
 
     // 4. 连接 CDP
     let mut tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-    let (browser, mut handler) = match Browser::connect(ws_url).await {
+    let (browser_raw, mut handler) = match Browser::connect(ws_url).await {
         Ok(v) => v,
         Err(e) => {
             cleanup_spawned(&mut child, &mut tasks, &temp_profile).await;
             return Err(format!("连接浏览器调试协议失败：{e}"));
         }
     };
+    let browser = Arc::new(tokio::sync::Mutex::new(browser_raw));
 
     // handler 驱动任务：持续运行驱动 CDP 消息循环，绝不因单条消息解析异常而退出
     // 只有当 handler.next().await 返回 None 时才代表浏览器完全关闭断开连接
@@ -472,7 +584,7 @@ pub async fn browser_extract_start(
 
     // 5. 挂 Network 监听：命令行已带 trae.cn 首页，正常至少 1 个页面；
     //    极端时序下 pages 为空则主动开新页兜底
-    let mut pages = match browser.pages().await {
+    let mut pages = match browser.lock().await.pages().await {
         Ok(p) => p,
         Err(e) => {
             cleanup_spawned(&mut child, &mut tasks, &temp_profile).await;
@@ -480,7 +592,7 @@ pub async fn browser_extract_start(
         }
     };
     if pages.is_empty() {
-        let page = match browser.new_page("https://www.trae.cn/login").await {
+        let page = match browser.lock().await.new_page("https://www.trae.cn/login").await {
             Ok(p) => p,
             Err(e) => {
                 cleanup_spawned(&mut child, &mut tasks, &temp_profile).await;
@@ -491,16 +603,129 @@ pub async fn browser_extract_start(
     }
 
     let captured: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let attached_page_ids: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
-    for page in pages {
+    for page in &pages {
+        let tid = page.target_id().as_ref().to_string();
+        attached_page_ids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(tid);
         attach_page_network_listener(
-            page,
+            page.clone(),
             app.clone(),
             captured.clone(),
+            attached_page_ids.clone(),
             group_id.clone(),
             &mut tasks,
         );
     }
+
+    let browser_watcher = browser.clone();
+    let app_watcher = app.clone();
+    let captured_watcher = captured.clone();
+    let gid_watcher = group_id.clone();
+    let attached_watcher = attached_page_ids.clone();
+
+    // 持续监听新打开的页面（包含 OAuth 弹窗、SSO 独立页等），确保任何登录方式都能捕获
+    tasks.push(tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let cur_pages = {
+                let b = browser_watcher.lock().await;
+                b.pages().await.ok()
+            };
+            if let Some(open_pages) = cur_pages {
+                for p in open_pages {
+                    let tid = p.target_id().as_ref().to_string();
+                    let should_attach = {
+                        let mut set = attached_watcher.lock().unwrap_or_else(|e| e.into_inner());
+                        if !set.contains(&tid) {
+                            set.insert(tid);
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if should_attach {
+                        let mut sub_tasks = Vec::new();
+                        attach_page_network_listener(
+                            p,
+                            app_watcher.clone(),
+                            captured_watcher.clone(),
+                            attached_watcher.clone(),
+                            gid_watcher.clone(),
+                            &mut sub_tasks,
+                        );
+                    }
+                }
+            }
+        }
+    }));
+
+    // 主动存储扫描引擎：每 1000ms 扫描当前全部打开页面的 LocalStorage / SessionStorage / document.cookie
+    let poll_browser = browser.clone();
+    let poll_app = app.clone();
+    let poll_captured = captured.clone();
+    let poll_gid = group_id.clone();
+    tasks.push(tokio::spawn(async move {
+        let js_scan_storage = r#"
+            (() => {
+                let texts = [];
+                try {
+                    for (let i = 0; i < localStorage.length; i++) {
+                        let k = localStorage.key(i);
+                        texts.push(k);
+                        texts.push(localStorage.getItem(k));
+                    }
+                } catch(e) {}
+                try {
+                    for (let i = 0; i < sessionStorage.length; i++) {
+                        let k = sessionStorage.key(i);
+                        texts.push(k);
+                        texts.push(sessionStorage.getItem(k));
+                    }
+                } catch(e) {}
+                try {
+                    texts.push(document.cookie);
+                } catch(e) {}
+                return texts.filter(Boolean).join('\n');
+            })()
+        "#;
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            let pages = {
+                let b = poll_browser.lock().await;
+                b.pages().await.ok()
+            };
+            if let Some(open_pages) = pages {
+                for page in open_pages {
+                    // 1. 页面存储与 DOM 扫描
+                    if let Ok(eval_res) = page.evaluate(js_scan_storage).await {
+                        if let Some(text) = eval_res.value().and_then(|v| v.as_str()) {
+                            if let Some(jwt) = find_jwt_in_text(text) {
+                                if handle_jwt_capture(&jwt, &poll_app, &poll_captured, &poll_gid).await {
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. 针对处于 trae.cn 站点的页面，适时触发带 credentials 的轻量探测
+                    let _ = page.evaluate(r#"
+                        (() => {
+                            try {
+                                if (window.location && window.location.hostname && window.location.hostname.includes('trae.cn')) {
+                                    fetch('/api/v1/user/info', { credentials: 'include' }).catch(() => {});
+                                }
+                            } catch(e) {}
+                        })()
+                    "#).await;
+                }
+            }
+        }
+    }));
 
     // 6. 记录句柄并通知前端
     *runtime.lock().unwrap_or_else(|e| e.into_inner()) = Some(BrowserExtractHandle {
@@ -580,9 +805,13 @@ fn save_captured_account(
     if let Some(acct) = accounts
         .accounts
         .iter_mut()
-        .find(|a| a.user_id.as_deref() == Some(user_id))
+        .find(|a| {
+            a.user_id.as_deref() == Some(user_id)
+                || jwt::parse(&a.jwt).user_id.as_deref() == Some(user_id)
+        })
     {
         acct.jwt = jwt.to_string();
+        acct.user_id = Some(user_id.to_string());
         acct.updated_at = Some(fs_utils::now_iso());
         let name = acct.name.clone();
         fs_utils::write_json(&state.path("checkin_accounts.json"), &accounts)?;
@@ -599,6 +828,7 @@ fn save_captured_account(
         .unwrap_or_else(|| format!("账号_{}", user_id.chars().take(8).collect::<String>()));
 
     accounts.accounts.push(RawAccount {
+        id: Some(format!("acc-{}", uuid::Uuid::new_v4().simple())),
         name: name.clone(),
         user_id: Some(user_id.to_string()),
         jwt: jwt.to_string(),
@@ -622,9 +852,10 @@ fn save_captured_account(
 }
 
 /// 停止提取并关闭浏览器（幂等）：优先 CDP 优雅关闭，
-/// 3s 未退出则强杀兜底，最后清理临时 Profile 目录
+/// 3s 未退出则强杀进程树兜底，最后清理临时 Profile 目录并通知前端
 #[tauri::command]
 pub async fn browser_extract_stop(
+    app: tauri::AppHandle,
     runtime: State<'_, Mutex<Option<BrowserExtractHandle>>>,
 ) -> Result<(), String> {
     // 取出句柄后立即释放锁：std MutexGuard 非 Send，不能跨 await（Tauri 命令要求 Send future）
@@ -633,24 +864,34 @@ pub async fn browser_extract_stop(
         .unwrap_or_else(|e| e.into_inner())
         .take()
     else {
-        return Ok(()); // 未运行：幂等
+        let _ = app.emit(
+            "browser-extract-progress",
+            progress("exited", "提取浏览器已关闭"),
+        );
+        return Ok(()); // 未运行：幂等通知
     };
     let profile_dir = h.profile_dir.clone();
-    if h.browser.close().await.is_err() {
-        h.kill_now();
-        clean_temp_profile(&profile_dir).await;
-        return Ok(());
-    }
-    if tokio::time::timeout(std::time::Duration::from_secs(3), h.child.wait())
-        .await
-        .is_err()
-    {
-        let _ = h.child.kill().await;
-    }
+
+    // 1. 关闭 CDP 浏览器
+    let _ = h.browser.lock().await.close().await;
+
+    // 2. 强杀进程树，彻底杀死残留子进程（避免第二次启动端口占用或附加旧进程）
+    h.kill_process_tree();
+
+    // 3. 取消关联任务
     for t in h.tasks.drain(..) {
         t.abort();
     }
+
+    // 4. 清理临时 Profile 目录
     clean_temp_profile(&profile_dir).await;
+
+    // 5. 通知前端已完全退出（确保按钮状态与 running 标志位正确重置）
+    let _ = app.emit(
+        "browser-extract-progress",
+        progress("exited", "浏览器已关闭，可重新启动提取"),
+    );
+
     Ok(())
 }
 
@@ -718,7 +959,20 @@ mod tests {
 
     #[test]
     fn tra_api_url_rejects_site() {
-        assert!(!is_trae_api_url("https://www.trae.cn/"));
+        assert!(!is_trae_api_url("https://www.google.com/"));
+        assert!(!is_trae_api_url("https://api.trae.cn/static/bundle.js"));
+    }
+
+    #[test]
+    fn auth_header_from_custom_token_and_cookie() {
+        assert_eq!(
+            auth_header(&json!({"x-cloudide-token": "abc123"})),
+            Some("abc123".to_string())
+        );
+        assert_eq!(
+            auth_header(&json!({"Cookie": "session=1; cloud_ide_jwt=token_xyz; other=2"})),
+            Some("token_xyz".to_string())
+        );
     }
 
     #[test]
@@ -772,5 +1026,33 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp);
         assert_eq!(find_chrome_in_dir(&tmp), None);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_find_jwt_in_text_various_sources() {
+        let fake_jwt = "eyJhbGciOiJub25lIn0.eyJkYXRhIjp7ImlkIjoiMTIzNDU2Nzg5In0sImV4cCI6MTk5OTk5OTk5OX0.dummy";
+        // 裸 token
+        assert_eq!(
+            find_jwt_in_text(fake_jwt),
+            Some(format!("Cloud-IDE-JWT {}", fake_jwt))
+        );
+        // Cookie 字符串
+        let cookie_str = format!("sessionid=abc; cloud_ide_jwt={}; path=/", fake_jwt);
+        assert_eq!(
+            find_jwt_in_text(&cookie_str),
+            Some(format!("Cloud-IDE-JWT {}", fake_jwt))
+        );
+        // JSON 字符串
+        let json_str = format!(r#"{{"token":"Bearer {}","code":0}}"#, fake_jwt);
+        assert_eq!(
+            find_jwt_in_text(&json_str),
+            Some(format!("Cloud-IDE-JWT {}", fake_jwt))
+        );
+        // URL 参数
+        let url_str = format!("https://www.trae.cn/?token={}&user=123", fake_jwt);
+        assert_eq!(
+            find_jwt_in_text(&url_str),
+            Some(format!("Cloud-IDE-JWT {}", fake_jwt))
+        );
     }
 }

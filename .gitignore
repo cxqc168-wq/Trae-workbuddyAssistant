@@ -62,3 +62,7 @@ license-guard/
 # Playwright Chromium 二进制（随安装包/便携版打包，排除在 git 之外）
 resources/browser/*
 !resources/browser/.gitkeep
+
+# Complete release runtime staging (downloaded/generated, never account data).
+resources/python/
+resources/ps/

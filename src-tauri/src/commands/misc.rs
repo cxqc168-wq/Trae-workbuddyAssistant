@@ -463,6 +463,7 @@ fn run_schtasks(args: &[&str]) -> Result<(bool, String, String), String> {
 pub fn task_register(state: State<AppState>, time: String) -> Result<(), String> {
     // 直接调用 python 签到脚本（无界面、可定时），注入数据目录
     let py = state.python_exe.clone();
+    let interpreter_args = crate::python::interpreter_args(&py, &state.python_dir).join(" ");
     let script = state.python_dir.join("auto_checkin.py");
     let data_dir = state.data_dir.to_string_lossy().to_string();
     // schtasks /TR 不会继承当前进程环境变量，需在命令行中显式设置 TRAEDATA_DIR。
@@ -471,9 +472,10 @@ pub fn task_register(state: State<AppState>, time: String) -> Result<(), String>
     // 不再使用 /RL HIGHEST：签到脚本只读取/写入 %APPDATA% 并运行 python，无需提权，
     // 否则普通用户会卡在「access denied」而注册失败（详见问题分析报告）。
     let tr = format!(
-        "cmd /c set \"TRAEDATA_DIR={}\" && \"{}\" \"{}\"",
+        "cmd /c set \"TRAEDATA_DIR={}\" && \"{}\" {} \"{}\"",
         data_dir,
         py.replace('\\', "/"),
+        interpreter_args,
         script.to_string_lossy().replace('\\', "/")
     );
     let task_name = "TraeWorkAssistant_DailyCheckin";

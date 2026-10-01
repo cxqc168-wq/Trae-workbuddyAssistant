@@ -5,6 +5,11 @@ pub mod credits;
 pub mod http;
 pub mod oauth;
 pub mod refresh;
+pub mod session_db;
+pub mod session_files;
+pub mod session_lineage;
+pub mod session_jobs;
+pub mod session_transfer;
 
 use std::path::PathBuf;
 

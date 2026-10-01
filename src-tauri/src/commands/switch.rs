@@ -620,3 +620,27 @@ pub fn reset_device_code(app: AppHandle, state: State<AppState>) -> Result<(), S
 
     Ok(())
 }
+
+/// 查询已保存的账号快照列表（profiles 目录下的子目录名）
+/// 用于前端在账号列表中显示哪些账号有快照，以及切换前预检查
+#[tauri::command]
+pub fn list_snapshots(state: State<AppState>) -> Result<Vec<String>, String> {
+    let profiles_dir = state.data_dir.join("profiles");
+    if !profiles_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    let entries = std::fs::read_dir(&profiles_dir)
+        .map_err(|e| format!("读取快照目录失败: {e}"))?;
+    for entry in entries.flatten() {
+        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            if let Some(name) = entry.file_name().to_str() {
+                // 排除 current_account.txt 等非目录项（上面已过滤），排除特殊槽位
+                if name != "last" && !name.starts_with('.') {
+                    result.push(name.to_string());
+                }
+            }
+        }
+    }
+    Ok(result)
+}

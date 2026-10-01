@@ -64,7 +64,7 @@ pub fn open_trae_app(_app: AppHandle, state: State<AppState>, proxy_port: Option
     Ok(())
 }
 
-fn detect_trae(custom: Option<String>) -> (bool, Option<String>, Option<String>) {
+pub fn detect_trae(custom: Option<String>) -> (bool, Option<String>, Option<String>) {
     // 优先使用用户在设置中指定的路径（兼容自定义安装目录）
     if let Some(p) = custom {
         let p = p.trim().to_string();
@@ -78,8 +78,18 @@ fn detect_trae(custom: Option<String>) -> (bool, Option<String>, Option<String>)
         "%LOCALAPPDATA%\\Programs\\TRAE SOLO\\TRAE SOLO.exe",
         "%ProgramFiles%\\TRAE SOLO CN\\TRAE SOLO CN.exe",
         "%ProgramFiles%\\TRAE SOLO\\TRAE SOLO.exe",
+        "%ProgramFiles(x86)%\\TRAE SOLO CN\\TRAE SOLO CN.exe",
+        "%ProgramFiles(x86)%\\TRAE SOLO\\TRAE SOLO.exe",
         "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe",
         "%ProgramFiles%\\Trae\\Trae.exe",
+        "%LOCALAPPDATA%\\Programs\\Trae Work CN\\Trae Work CN.exe",
+        "%ProgramFiles%\\Trae Work CN\\Trae Work CN.exe",
+        "D:\\TRAE SOLO CN\\TRAE SOLO CN.exe",
+        "D:\\Programs\\TRAE SOLO CN\\TRAE SOLO CN.exe",
+        "E:\\TRAE SOLO CN\\TRAE SOLO CN.exe",
+        "E:\\Programs\\TRAE SOLO CN\\TRAE SOLO CN.exe",
+        "F:\\TRAE SOLO CN\\TRAE SOLO CN.exe",
+        "F:\\Programs\\TRAE SOLO CN\\TRAE SOLO CN.exe",
     ];
     for c in candidates {
         let expanded = expand_env(c);
@@ -99,6 +109,7 @@ fn detect_trae(custom: Option<String>) -> (bool, Option<String>, Option<String>)
 fn expand_env(p: &str) -> String {
     p.replace("%LOCALAPPDATA%", &std::env::var("LOCALAPPDATA").unwrap_or_default())
         .replace("%ProgramFiles%", &std::env::var("ProgramFiles").unwrap_or_default())
+        .replace("%ProgramFiles(x86)%", &std::env::var("ProgramFiles(x86)").unwrap_or_default())
 }
 
 fn version_of(path: &str) -> Option<String> {

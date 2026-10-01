@@ -10,9 +10,15 @@ pub const WORKBUDDY_API_ENDPOINT: &str = "https://www.codebuddy.cn";
 pub const WORKBUDDY_API_PREFIX: &str = "/v2/plugin";
 pub const CHECKIN_API_PREFIX: &str = "/v2/billing/meter";
 
+/// 浏览器风格 User-Agent。WorkBuddy 网关会校验 UA，ureq 默认的
+/// `ureq/x.y.z` 会被拒绝并返回「请求不合法，如有疑问请联系客服」。
+const BROWSER_USER_AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(20))
+        .user_agent(BROWSER_USER_AGENT)
         .build()
 }
 

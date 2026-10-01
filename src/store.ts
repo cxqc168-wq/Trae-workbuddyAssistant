@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { sendNotification } from '@tauri-apps/plugin-notification';
-import { api, setupListeners, type CheckinProgressEvent, type ProfileDoneEvent, type SaveLoginDoneEvent } from './lib/tauri';
+import { api, setupListeners, type CheckinProgressEvent, type ProfileDoneEvent, type SaveLoginDoneEvent, type WbSwitchDoneEvent } from './lib/tauri';
 import type {
   AccountView,
   ApiServiceStatus,
@@ -65,6 +65,8 @@ interface AppState {
   proxyLog: string[];
   switchProgress: string[];
   switchingTo: string | null;
+  snapshotIds: string[];
+  refreshSnapshots: () => Promise<void>;
   saveLoginProgress: string[];
   savingLogin: string | null;
   deviceResetProgress: string[];
@@ -100,8 +102,8 @@ interface AppState {
   stopProxy: () => Promise<void>;
   openTraeWithProxy: () => Promise<void>;
   addAccount: (name: string, jwt: string, groupId?: string) => Promise<void>;
-  deleteAccount: (userId: string, deleteProfile: boolean) => Promise<void>;
-  updateAccount: (userId: string, name?: string, jwt?: string) => Promise<void>;
+  deleteAccount: (userId: string, deleteProfile: boolean, accountId?: string) => Promise<void>;
+  updateAccount: (userId: string, name?: string, jwt?: string, accountId?: string) => Promise<void>;
   createGroup: (name: string, color: string) => Promise<void>;
   updateGroup: (
     id: string,
@@ -143,7 +145,7 @@ function defaultSettings(): Settings {
     proxy_port: 8899,
     theme: 'system',
     launch_minimized: false,
-    auto_start_proxy: true,
+    auto_start_proxy: false,
     tray: true,
     language: 'zh-CN',
     checkin_skip_checked: true,
@@ -181,6 +183,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   proxyLog: [],
   switchProgress: [],
   switchingTo: null,
+  snapshotIds: [],
   saveLoginProgress: [],
   savingLogin: null,
   deviceResetProgress: [],
@@ -240,6 +243,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           e.success ? '登录态已保存，可随时切换回此账号' : '登录态保存失败，请查看日志',
         );
         void get().refreshProfiles();
+        if (e.success) {
+          void get().refreshSnapshots();
+        }
       },
       onDeviceResetProgress: (line) =>
         set((s) => ({ deviceResetProgress: [...s.deviceResetProgress.slice(-99), line] })),
@@ -291,6 +297,32 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
         void get().refreshProfiles();
       },
+      // M1：WorkBuddy 客户端切换完成
+      onWbSwitchDone: (e: WbSwitchDoneEvent) => {
+        get().pushToast(
+          e.success ? 'success' : 'error',
+          e.success
+            ? `WorkBuddy 已切换到 ${e.nickname || e.uid}`
+            : 'WorkBuddy 切换失败',
+        );
+        void get().refreshAccounts();
+      },
+      // M2：WorkBuddy 会话迁移进度
+      onWbSessionJob: (e) => {
+        if (e.status === 'done') {
+          get().pushToast(
+            'success',
+            `会话迁移完成：成功 ${e.copied}，跳过 ${e.skipped}，失败 ${e.failed}`,
+          );
+        } else if (e.status === 'partial') {
+          get().pushToast(
+            'info',
+            `会话迁移部分完成：成功 ${e.copied}，跳过 ${e.skipped}，失败 ${e.failed}`,
+          );
+        } else if (e.status === 'failed') {
+          get().pushToast('error', `会话迁移失败：${e.error || '未知错误'}`);
+        }
+      },
     });
     await Promise.all([
       get().refreshEnv(),
@@ -307,9 +339,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     ]);
     set({ ready: true });
 
-    // 启动时根据设置自动开启代理
+    // 软件启动时右上角的代理默认保持关闭状态（仅在设置中明确开启 auto_start_proxy 时启动）
     const s = get();
-    if (!s.proxy.running && s.settings?.auto_start_proxy) {
+    if (!s.proxy.running && s.settings?.auto_start_proxy === true) {
       void s.startProxy();
     }
   },
@@ -417,6 +449,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const accounts = await api.accounts.list();
       set({ accounts });
+      // 同时刷新快照列表，用于显示哪些账号有快照
+      void get().refreshSnapshots();
     } catch (err) {
       get().pushToast('error', `读取账号失败：${String(err)}`);
     }
@@ -531,18 +565,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw err;
     }
   },
-  deleteAccount: async (userId, deleteProfile) => {
+  deleteAccount: async (userId, deleteProfile, accountId) => {
     try {
-      await api.accounts.delete(userId, deleteProfile);
+      await api.accounts.delete(userId, deleteProfile, accountId);
       await get().refreshAccounts();
       get().pushToast('info', '账号已删除');
     } catch (err) {
       get().pushToast('error', `删除失败：${String(err)}`);
     }
   },
-  updateAccount: async (userId, name, jwt) => {
+  updateAccount: async (userId, name, jwt, accountId) => {
     try {
-      await api.accounts.update(userId, name, jwt);
+      await api.accounts.update(userId, name, jwt, accountId);
       await get().refreshAccounts();
       get().pushToast('success', '账号已更新');
     } catch (err) {
@@ -594,11 +628,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().pushToast('error', `重置失败：${String(err)}`);
     }
   },
+  refreshSnapshots: async () => {
+    try {
+      const ids = await api.listSnapshots();
+      set({ snapshotIds: ids });
+    } catch {
+      // 静默失败，不影响主流程
+    }
+  },
   switchTo: async (userId) => {
+    if (get().switchingTo || get().savingLogin) return;
     try {
       set({ switchingTo: userId, switchProgress: [] });
-      await api.switchAccount(userId);
       get().pushToast('info', '正在切换登录态，请稍候…');
+      await api.switchAccount(userId);
     } catch (err) {
       set({ switchingTo: null });
       get().pushToast('error', `切换失败：${String(err)}`);

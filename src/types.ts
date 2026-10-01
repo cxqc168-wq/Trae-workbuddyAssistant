@@ -31,6 +31,7 @@ export interface ProxyStatus {
 }
 
 export interface AccountView {
+  id?: string;
   user_id: string;
   name: string;
   group_id: string | null;

@@ -1,4 +1,4 @@
-# AGENT.md — Trae Work Assistant v2.4.4
+# AGENT.md — Trae Work Assistant v2.4.7
 
 > 项目级别速查手册。给后续会话（人或 AI）秒接上下文用。任何会改契约的提交请同步更新本文档。
 
@@ -48,7 +48,7 @@ trae-work-assistant/
 │   ├── components/               # TitleBar/Sidebar/TopBar/Toaster/PageHeader/SetupGuide/ui
 │   └── pages/                    # Dashboard / Accounts / Checkin / Credits / Logs / ApiService / Settings
 ├── src-tauri/
-│   ├── tauri.conf.json           # 无装饰窗 / bundle.resources = ../src-python/ + ../src-ps/
+│   ├── tauri.conf.json           # 无装饰窗 / bundle.resources = ../resources/python/ + ../src-ps/ + ../resources/browser/
 │   └── src/
 │       ├── main.rs               # 注册全部命令
 │       ├── state.rs              # AppState（%APPDATA%\TraeWorkAssistant + python_dir）
@@ -213,4 +213,6 @@ trae-work-assistant/
 - **`schtasks` 中文输出是 GBK**，直接 `String::from_utf8_lossy` 会乱码。统一走 `misc.rs::run_schtasks()`（前置 `chcp 65001`），**不要**再裸调 `Command::new("schtasks")`。
 - **计划任务不加 `/RL HIGHEST`**：签到脚本只读写 `%APPDATA%` 并运行 Python，加了会让普通用户注册失败（Access Denied）。
 - **错误文案不重复加前缀**：Rust 端返回纯错误描述，`查询失败：` / `注册失败：` 等前缀由前端 `Settings.tsx` 统一拼接。
-- **`src-python/` 会打包进 `resources/python/`**：Python 侧改动在正式版必须 `npm run tauri build` 重新打包才生效；`npm run tauri dev` 直读源码，重启对应功能即生效。
+- **Python 发布资源**：`release:prepare` 将完整运行时、固定 wheel 依赖与 `src-python/*.py` 准备到 `resources/python/`，安装包映射为 `python/`。生产子进程优先内置解释器，并使用 `-I -X utf8`；系统 Python 开发回退保持原行为。
+- **开发资源**：启动前 `scripts/prepare-dev.mjs` 将 Python 源码同步到资源目录，支持干净检出；`start.bat` 使用 5188 起的首个空闲端口。干净检出执行 Rust 测试前运行 `node scripts/prepare-dev.mjs`，验证完整发布运行时则运行 `npm run release:prepare`。
+- **安装器**：MSI 与 NSIS EXE 内含完整浏览器和 WebView2 离线安装程序。构建前运行隔离检查，发布前提取两个安装器并核对资源清单。流程见 `docs/windows-release.md`。
