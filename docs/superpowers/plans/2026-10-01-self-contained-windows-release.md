@@ -44,5 +44,13 @@
 ### Task 3: Publish verified release
 
 - [x] Review source and staged files for secrets and generated account/runtime data.
-- [ ] Commit source changes, fast-forward push to the authorized repository and create version 2.4.7.
-- [ ] Upload both installers, manifest and checksums; verify remote assets and return the release URL.
+- [x] Commit source changes, fast-forward push to the authorized repository and create version 2.4.7.
+- [x] Upload both installers, manifest and checksums; verify remote assets and return the release URL.
+
+## Verification record
+
+- Rust: 73 passed; Python helper tests and frontend production build passed.
+- MSI and EXE: 4,270 resource hashes match in each extracted payload; isolated runtime checks passed.
+- Extracted MSI application rendered the production activation gate in an isolated user profile.
+- GitHub: all five uploaded assets matched server sizes and SHA256 before publication.
+- Release: https://github.com/cxqc168-wq/Trae-workbuddyAssistant/releases/tag/v2.4.7
