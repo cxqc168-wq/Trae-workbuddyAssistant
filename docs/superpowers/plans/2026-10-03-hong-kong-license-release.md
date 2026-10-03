@@ -29,15 +29,15 @@
 
 - [x] Confirm SSH host identity, inspect existing service, and preserve or migrate matching signing/configuration data.
 - [x] Update native and external Python client endpoint, version metadata and current documentation.
-- [ ] Build MSI and NSIS EXE; run existing tests and extracted-payload verification.
-- [ ] Review changes, commit and push to the user's existing repository.
-- [ ] Publish v2.4.8 and compare remote asset sizes and SHA256 with local verified artifacts.
+- [x] Build MSI and NSIS EXE; run existing tests and extracted-payload verification.
+- [x] Review changes, commit and push to the user's existing repository.
+- [x] Publish v2.4.8 and compare remote asset sizes and SHA256 with local verified artifacts.
 
 ## Execution record
 
 - Initial tree clean; version 2.4.7 already published to the user's repository.
 - Both old and new public health endpoints return HTTP 200 with status ok.
-- SSH connection stopped before password authentication because the new host key differs from known_hosts. User fingerprint confirmation is pending.
+- Initial SSH connection stopped before password authentication because the new host key differs from known_hosts; the user subsequently confirmed the fingerprint.
 - Ruling: prepare client configuration and build while waiting; publication depends on verifying the new service's signing identity.
 - User explicitly confirmed trusting the current ED25519 fingerprint; subsequent connections pin it exactly.
 - Hong Kong service was already active with the same public key. No server redeployment or key replacement was needed.
@@ -47,3 +47,12 @@
 - Compiled release executable contains the new default endpoint and does not contain the old endpoint.
 - Ruling: commit and push the verified source while installer compression runs. Publishing the release remains gated on both extracted-payload checks.
 - MSI resource verification exposed a Windows taskkill cleanup race after successful browser readiness. A real-process regression reproduced exit code 128; the verifier now waits for process exit instead of treating a vanished PID as failure.
+- Cleanup regression passed after the fix, and independent review found no actionable issue. The release workflow runs this regression against the real bundled runtime.
+- Full Tauri build exited successfully with both installers. Each extracted installer passed all 4270 resource hashes and isolated Python, DPAPI, TLS, SQLite, proxy CA and browser checks.
+- Both installers include the same 212272848-byte offline WebView2 component.
+- Source and verifier fix pushed to master; release target commit: `b3069b1ae5f83d51a96dfa798c57922993f0272b`.
+- Published `https://github.com/cxqc168-wq/Trae-workbuddyAssistant/releases/tag/v2.4.8`, confirmed non-draft and latest.
+- All five GitHub asset names, sizes and SHA256 digests match local verified files after publication. Tag `v2.4.8` resolves to the release target commit.
+- MSI: 471372908 bytes, SHA256 `6c4635efcf5035bcbf854c7b7fc649d649aececb55db8ea5ef9c79be08f8b955`.
+- EXE: 401647207 bytes, SHA256 `50992cc3a9c5af33850563447b139882f665ce2a5eb9b4b6bb1bc611435a29cd`.
+- Root password, activation code and signing private key were not saved into tracked source or release assets. Existing server service and signing identity were retained.
