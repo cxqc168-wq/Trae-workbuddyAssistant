@@ -20,7 +20,7 @@ use std::time::Duration;
 
 /// 验证服务器地址；可用环境变量 LICENSE_GUARD_SERVER_URL 覆盖（仅改地址，
 /// 验签仍用内置公钥，指向假服务器也无法伪造凭证）。
-pub const SERVER_URL: &str = "http://64.90.20.244:8443";
+pub const SERVER_URL: &str = "http://154.222.24.81:8443";
 
 /// 与服务器私钥配对的公钥（编译期嵌入，发布产物不依赖外部文件）。
 pub const PUBLIC_KEY_PEM: &str = include_str!("public_key.pem");

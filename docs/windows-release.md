@@ -1,12 +1,14 @@
 # Windows 完整安装包
 
-版本 2.4.7 同时提供 MSI 和 NSIS EXE，两者包含同一应用与运行时。选择一个安装即可。
+版本 2.4.8 同时提供 MSI 和 NSIS EXE，两者包含同一应用与运行时。选择一个安装即可。
 
 ## 授权集成
 
 本项目的 `src-tauri/src/license_guard/` 是 `D:\My_Codeproject\license-guard\client\license_guard` 授权协议的 Rust 实现。它在生产构建中启用激活入口、RSA-SHA256 公钥验签、机器绑定、过期和时钟回拨检查。公钥与该项目完全一致，编译到可执行文件中；私钥、授权口令、本机 license.dat 和用户账号数据均不进入安装包。
 
 license-guard 原项目的 PyInstaller 示例适用于 Python 应用；本项目使用 Tauri 原生 WiX / NSIS 打包，保留已有授权实现，不使用示例 Python 程序替代桌面应用。首次激活仍需要授权服务器可达和有效口令。
+
+2.4.8 的默认授权服务地址为 `http://154.222.24.81:8443`。客户端仍使用原公钥校验签名；服务器签名密钥必须与该公钥配对。
 
 ## 内置组件
 
