@@ -85,7 +85,10 @@ print(json.dumps({"python": sys.version.split()[0], "cryptography": cryptography
                 if browser.poll() is None:
                     subprocess.run([str(Path(windows_dir) / "System32" / "taskkill.exe"),
                                     "/PID", str(browser.pid), "/T", "/F"],
-                                   capture_output=True, timeout=15, check=True)
+                                   capture_output=True, timeout=15, check=False)
+                # The process can exit between poll() and taskkill, or while
+                # taskkill walks its child tree. Its exit status is not a
+                # cleanup failure; the bounded wait still requires it to stop.
                 browser.wait(timeout=15)
     print("Bundled runtime checks passed (isolated Python, DPAPI, TLS, SQLite, proxy CA, browser).", flush=True)
 

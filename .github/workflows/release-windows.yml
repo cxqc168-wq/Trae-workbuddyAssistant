@@ -48,6 +48,9 @@ jobs:
       - name: Prepare complete runtime resources
         run: npm run release:prepare
 
+      - name: Test browser cleanup race with bundled runtime
+        run: python -X utf8 scripts/test-release-runtime.py
+
       - name: Test Rust backend
         working-directory: src-tauri
         run: cargo test --locked

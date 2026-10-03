@@ -46,3 +46,4 @@
 - External license-guard suite: 38 tests passed. Independent review found no actionable issue.
 - Compiled release executable contains the new default endpoint and does not contain the old endpoint.
 - Ruling: commit and push the verified source while installer compression runs. Publishing the release remains gated on both extracted-payload checks.
+- MSI resource verification exposed a Windows taskkill cleanup race after successful browser readiness. A real-process regression reproduced exit code 128; the verifier now waits for process exit instead of treating a vanished PID as failure.
